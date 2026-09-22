@@ -54,7 +54,7 @@ try {
     assert environment.state().class.simpleName == "Loaded"
 
     def settings = project.getService(loader.loadClass("org.rust.cargo.project.settings.RustProjectSettingsService"))
-    waitUntil("automatic Rust toolchain") { settings.toolchain != null }
+    waitUntil("automatic Rust toolchain") { settings.toolchain?.class?.simpleName == "EnvletWslRustToolchain" }
     record("toolchain=" + settings.toolchain.class.simpleName)
     // Exercise PATH construction before Envlet's loaded environment can hide it.
     def linuxHome = settings.toolchain.toRemotePath(settings.toolchain.location)
@@ -97,7 +97,8 @@ try {
     record("path.target-inheritance-and-none=passed")
     def provider = loader.loadClass("io.github.salatmaster.direnv.rust.EnvletRustToolchainProvider")
         .getConstructor().newInstance()
-    def home = root.resolve(".devenv/profile/bin")
+    def home = settings.toolchain.location
+    assert home.startsWith(root.resolve(".direnv/envlet/rust"))
     assert provider.getToolchain(home) != null
     assert provider.getToolchain(root.resolve("unmanaged/bin")) == null
     assert provider.getToolchain(root.resolve("../other-project/.devenv/profile/bin").normalize()) == null

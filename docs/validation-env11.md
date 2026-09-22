@@ -1,5 +1,8 @@
 # ENV-11: native Cargo environment in Windows IDEA / WSL
 
+This records 0.1.1–0.1.2. [ENV-13](validation-env13.md) removes the devenv-specific
+home requirement in 0.1.3 while retaining and rerunning these PATH/Cargo regressions.
+
 Investigated 2026-09-23 against Windows IDEA IU-262.10968.63 and Rust plugin
 262.10968.75, with NixOS WSL `legion-wsl`. Development artifact: 0.1.1-dev.
 

@@ -1,5 +1,6 @@
 // Investigation harness for two disposable, approved plain-direnv Cargo projects.
 // No SDK is assigned by this script. Cargo manifests are attached as import setup.
+// Revokes/restores approval ONLY for the explicitly authored split-tools fixture.
 // Properties: envlet.validation.project = WSL parent of split-tools/common-tools,
 // envlet.validation.result = status-only output file. Use an isolated IDEA profile.
 import com.intellij.ide.plugins.PluginManagerCore
@@ -28,6 +29,8 @@ def plugin = PluginManagerCore.getPlugin(PluginId.getId("io.github.lying200.envl
 assert plugin?.enabled
 record("envlet=" + plugin.version)
 def loader = plugin.pluginClassLoader
+def passed = true
+def cases = []
 
 for (layout in ["split-tools", "common-tools"]) {
     def root = parent.resolve(layout)
@@ -66,9 +69,15 @@ for (layout in ["split-tools", "common-tools"]) {
         imported.getCompleted()
         // Give automatic discovery a bounded chance, including ordinary Cargo import.
         def deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
-        while (settings.toolchain == null && System.nanoTime() < deadline) Thread.sleep(200)
+        while (settings.toolchain?.class?.simpleName != "EnvletWslRustToolchain" && System.nanoTime() < deadline) Thread.sleep(200)
         record("toolchain=" + (settings.toolchain?.class?.simpleName ?: "none"))
         if (settings.toolchain != null) record("toolchain.home=" + settings.toolchain.location)
+        if (settings.toolchain?.class?.simpleName == "EnvletWslRustToolchain") {
+            assert settings.toolchain.location.startsWith(root.resolve(".direnv/envlet/rust"))
+            assert Files.isSymbolicLink(settings.toolchain.location.resolve("rustc"))
+            assert Files.isSymbolicLink(settings.toolchain.location.resolve("cargo"))
+            cases.add([project: project, root: root, home: settings.toolchain.location])
+        } else passed = false
         if (settings.toolchain != null) {
             // The settings event can schedule a second sync after initial attachment.
             // Await a refresh with the selected toolchain before reading final statuses.
@@ -79,6 +88,8 @@ for (layout in ["split-tools", "common-tools"]) {
         def loaded = cargo.allProjects.find { it.manifest == root.resolve("Cargo.toml") }
         record("cargo.workspace=" + loaded?.workspaceStatus?.class?.simpleName)
         record("cargo.buildScripts=" + loaded?.buildScriptEvaluationStatus?.class?.simpleName)
+        if (loaded?.workspaceStatus?.class?.simpleName != "UpToDate" ||
+            loaded?.buildScriptEvaluationStatus?.class?.simpleName != "UpToDate") passed = false
         if (settings.toolchain != null) {
             def cargoTool = loader.loadClass("org.rust.cargo.toolchain.tools.Cargo").getConstructors()
                 .find { it.parameterCount == 2 }.newInstance(settings.toolchain, false)
@@ -94,14 +105,53 @@ for (layout in ["split-tools", "common-tools"]) {
                 // Classify the known compiler failure without persisting output/environment.
                 def combined = output.stdout + output.stderr
                 record("cargo.build.missing-cc=" + (combined.contains('tool "cc"') || combined.contains('linker `cc` not found')))
+                if (output.timeout || output.exitCode != 0) passed = false
             }
         } else {
             record("cargo.build=skipped-no-toolchain")
+            passed = false
         }
     } catch (Throwable failure) {
         record("ERROR=" + failure.class.simpleName)
+        passed = false
         record("ERROR.at=" + failure.stackTrace.find { it.fileName?.endsWith(".groovy") })
         // Continue the independent second layout; no raw exception messages/env dumps.
     }
 }
+if (passed && cases.size() == 2) {
+    def provider = loader.loadClass("io.github.salatmaster.direnv.rust.EnvletRustToolchainProvider").getConstructor().newInstance()
+    def first = cases[0]
+    def second = cases[1]
+    assert first.home != second.home
+    assert Files.isSameFile(first.home.resolve("rustc"), second.home.resolve("rustc"))
+    assert provider.getToolchain(first.home) != null && provider.getToolchain(second.home) != null
+    assert provider.getToolchain(first.home.resolve("rustc").toRealPath().parent) == null : "Shared store directory must not be claimed"
+    def options = first.project.getService(loader.loadClass("io.github.salatmaster.direnv.settings.DirenvSettings"))
+    options.state.autoRustToolchain = false
+    try {
+        assert provider.getToolchain(first.home) == null
+        assert provider.getToolchain(second.home) != null
+    } finally { options.state.autoRustToolchain = true }
+    options.state.enabled = false
+    try {
+        assert provider.getToolchain(first.home) == null
+        assert provider.getToolchain(second.home) != null
+    } finally { options.state.enabled = true }
+    record("provider.project-isolation-and-disable=passed")
+    assert Files.readString(first.root.resolve("Cargo.toml")).contains('name = "envlet-direnv-split-tools"')
+    def environment = first.project.getService(loader.loadClass("io.github.salatmaster.direnv.DirenvService"))
+    try {
+        environment.scheduleBlock(first.root.resolve(".envrc"), first.root)
+        waitUntil("fixture revocation") { environment.state().class.simpleName in ["Denied", "Blocked"] }
+        assert provider.getToolchain(first.home) == null : "Revoked environment must not retain toolchain ownership"
+        assert provider.getToolchain(second.home) != null
+    } finally {
+        // Restore the approval this disposable fixture had on entry, even after failure.
+        environment.scheduleAllow(first.root.resolve(".envrc"), first.root)
+        waitUntil("fixture approval restore") { environment.state().class.simpleName == "Loaded" && provider.getToolchain(first.home) != null }
+    }
+    record("provider.revocation-and-restore=passed")
+}
+record("ACCEPTANCE=" + passed)
+assert passed : "Plain direnv Rust acceptance failed; see the status report"
 record("FINISHED")

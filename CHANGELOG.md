@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-13: discover Rust tools independently and assemble project-owned SDK
+  directories from executable links, removing the devenv-profile requirement for
+  WSL builds. Bind providers only to current loaded environments; verify split/common
+  tool layouts, project isolation, revocation/restore and existing devenv behavior.
+
 - Independent Envlet identity, settings and Apache-2.0 upstream attribution.
 - Target IDEA 2026.2.3 / build 262 with Java 25 and optional Go/Rust adapters.
 - Synchronize Go SDK/GOPATH and Rust WSL toolchain/standard library sources from direnv.

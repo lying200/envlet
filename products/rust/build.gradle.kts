@@ -7,7 +7,14 @@ plugins {
 
 kotlin { jvmToolchain(25) }
 
+testing {
+    suites {
+        named<JvmTestSuite>("test") { useJUnitJupiter(libs.versions.junitJupiter) }
+    }
+}
+
 dependencies {
+    testImplementation(libs.assertj)
     implementation(project(":core"))
     intellijPlatform {
         val localIde = providers.gradleProperty("localIdePath").orNull

@@ -1,5 +1,10 @@
 # Plain direnv Rust validation — 2026-09-23
 
+This records the failing 0.1.2-dev baseline. Both failures are fixed in 0.1.3-dev;
+see [ENV-13 implementation and acceptance](validation-env13.md). The linked script
+has since become an asserting regression with project-isolation and fixture
+approval revoke/restore checks.
+
 Tested Envlet 0.1.2-dev in the installed Windows IDEA IU-262.10968.63, Rust plugin
 262.10968.75, with NixOS WSL `legion-wsl`. The ordinary user IDE was not modified;
 the existing isolated validation profile was used.

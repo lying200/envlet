@@ -46,9 +46,17 @@ Probe `go env -json GOROOT GOPATH GOMODCACHE GOVERSION GOOS GOARCH` **inside the
 
 ## Rust binding
 
+**ENV-13 follow-up (0.1.3-dev):** discovery now resolves rustc and cargo separately
+and prepares a real project-owned SDK directory with links to their canonical
+executable paths. It works with split Nix packages and does not depend on devenv.
+The provider matches a published in-memory project binding against the current
+loaded environment, not a particular directory name or shared Nix store home.
+Both plain-direnv layouts and the previous devenv regression pass in the actual
+Windows IDEA. See [implementation and acceptance](../validation-env13.md).
+
 **ENV-11 follow-up (2026-09-23):** callable SDK setters alone did not establish native
 build support. `RsWslToolchain.patchCommandLine` forces the legacy `wsl.exe` launcher,
-which captures environment before `CommandLineEnvCustomizer` runs. Envlet now uses
+which captures environment before `CommandLineEnvCustomizer` runs. Envlet 0.1.1–0.1.2 used
 the public `RsToolchainProvider` / `RsToolchainBase` interfaces for matching project
 devenv profiles, preserving UNC executables for EEL. Rust's `RsEelToolchain` is
 `ApiStatus.Internal` in [R] and is deliberately not used. `RsPathManager.nativeHelper`

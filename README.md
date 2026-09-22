@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.2-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.1.3-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -33,18 +33,24 @@ The terminal loads through its own hook, preserving devenv's startup output;
 IDE processes and SDK selection use Envlet's in-memory environment cache.
 
 On a successful environment load, Envlet queries `go env` for GOROOT/GOPATH and
-selects the corresponding WSL SDK. For Rust, it prefers the project's `.devenv/profile/bin`
-when it exposes the same rustc and cargo selected by PATH, then configures the toolchain
-and available standard library sources. On Windows/WSL this profile uses the platform's
-EEL process launcher so Cargo sync and native dependency builds receive the loaded
-compiler environment. Other toolchain directories retain their existing behavior;
-see the [ENV-11 investigation and validation](docs/validation-env11.md).
+selects the corresponding WSL SDK. For Rust on WSL or native Linux, it independently
+discovers rustc and cargo from PATH and creates a project-owned SDK under
+`.direnv/envlet/rust/<tool-mapping-hash>/bin`. This directory contains links to the
+selected executables, including available companion tools; no environment snapshots
+or launcher scripts are written. Standard library sources are configured separately.
+On Windows/WSL this SDK uses EEL so Cargo sync and native dependency builds receive
+the loaded compiler environment. See [ENV-13 validation](docs/validation-env13.md).
 Environment reloads repeat synchronization. Import Go/Cargo projects as usual.
 Turning off automatic management leaves the last SDK paths in place; you can then
 change them manually. Envlet does not create language run/debug configurations.
 
 To roll back, disable or uninstall Envlet and restore any previous SDK selections.
 Its settings use `envlet.xml`; upstream settings remain separate.
+Generated SDKs require a writable project cache. Envlet writes an ignore file only
+inside `.direnv/envlet`, preserving the project's `.gitignore`. Tool changes create
+a new directory, retaining old SDK links for in-flight builds. After restoring SDK
+selections and closing the project, this Envlet cache can be removed independently
+of other `.direnv` contents.
 
 ## direnv, devenv and host platforms
 
@@ -52,19 +58,19 @@ Environment loading uses `direnv export json`; devenv is optional. An approved
 `.envrc` may use ordinary exports, nix-direnv or devenv. Go discovery queries the
 selected `go` executable and does not require a devenv profile.
 
-Rust discovery currently needs a directory exposing both PATH-selected `rustc`
-and `cargo`. A devenv profile supplies that directory, but another PATH directory
-can work too. Separate Nix packages with no common directory may require additional
-toolchain setup; Envlet does not generate a synthetic toolchain directory.
+Rust discovery no longer requires a common directory for rustc and cargo on WSL or
+native Linux. Each project's generated SDK has its own identity even when projects
+share Nix store packages. The provider claims only a successfully prepared SDK bound
+to that project's current loaded environment. Disabling management or revoking the
+environment ends that ownership; the last selected SDK path remains as described above.
 
 | Host / environment | Current scope |
 | --- | --- |
 | Windows IDEA + WSL + devenv | Real SDK, Cargo native build, PATH and classic terminal checks |
-| Windows IDEA + WSL + plain direnv | Environment injection verified; Rust tests expose missing SDK discovery for split tools and missing C compiler environment for a common non-devenv directory. See [plain-direnv results](docs/validation-plain-direnv.md). Go discovery is generic |
+| Windows IDEA + WSL + plain direnv | Split and common tool layouts both pass automatic Rust SDK selection, Cargo sync and bundled SQLite builds; project isolation and revocation/restore verified. Go discovery is generic |
 | Native Linux IDEA + direnv, with or without devenv | Implemented local environment/Go/Rust paths; Rust uses `RsLocalToolchain` and does not need the WSL workaround. Full NixOS desktop IDE validation remains outstanding |
 
-The `.devenv/profile/bin` restriction belongs to the WSL Rust compatibility adapter,
-not to Envlet's general environment loading. Native Linux still requires a working
+The former `.devenv/profile/bin` restriction was removed in 0.1.3-dev. Native Linux still requires a working
 IDE installation, a discoverable direnv executable (or its configured absolute path),
 and the appropriate JetBrains language plugins.
 
