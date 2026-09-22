@@ -60,7 +60,7 @@ toolchain setup; Envlet does not generate a synthetic toolchain directory.
 | Host / environment | Current scope |
 | --- | --- |
 | Windows IDEA + WSL + devenv | Real SDK, Cargo native build, PATH and classic terminal checks |
-| Windows IDEA + WSL + plain direnv | Environment loading and Go discovery are generic; the Rust EEL/native-build fix currently requires the matching project `.devenv/profile/bin` |
+| Windows IDEA + WSL + plain direnv | Environment injection verified; Rust tests expose missing SDK discovery for split tools and missing C compiler environment for a common non-devenv directory. See [plain-direnv results](docs/validation-plain-direnv.md). Go discovery is generic |
 | Native Linux IDEA + direnv, with or without devenv | Implemented local environment/Go/Rust paths; Rust uses `RsLocalToolchain` and does not need the WSL workaround. Full NixOS desktop IDE validation remains outstanding |
 
 The `.devenv/profile/bin` restriction belongs to the WSL Rust compatibility adapter,
