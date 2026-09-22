@@ -9,6 +9,7 @@ import com.intellij.openapi.project.ex.ProjectManagerEx
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.execution.configuration.EnvironmentVariablesData
+import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -55,6 +56,45 @@ try {
     def settings = project.getService(loader.loadClass("org.rust.cargo.project.settings.RustProjectSettingsService"))
     waitUntil("automatic Rust toolchain") { settings.toolchain != null }
     record("toolchain=" + settings.toolchain.class.simpleName)
+    // Exercise PATH construction before Envlet's loaded environment can hide it.
+    def linuxHome = settings.toolchain.toRemotePath(settings.toolchain.location)
+    def canary = "envlet-private-path-canary"
+    for (suppliedPath in ["/fixture/${canary}/tool dir:/fixture/second::/fixture/last".toString(), "", linuxHome + ":/fixture/bin"]) {
+        for (parent in GeneralCommandLine.ParentEnvironmentType.values()) {
+            def explicitPath = new GeneralCommandLine("cargo")
+                .withParentEnvironmentType(parent).withEnvironment("PATH", suppliedPath)
+            settings.toolchain.patchCommandLine(explicitPath, false, true)
+            def expected = suppliedPath.startsWith(linuxHome + ":") ? suppliedPath : linuxHome + ":" + suppliedPath
+            assert explicitPath.environment["PATH"] == expected : "WSL PATH must use POSIX home and separator"
+            settings.toolchain.patchCommandLine(explicitPath, false, true)
+            assert explicitPath.environment["PATH"] == expected : "Repeated patch must not duplicate the toolchain"
+            assert !explicitPath.commandLineString.contains(canary) : "Environment value leaked into command arguments"
+        }
+    }
+    def untouched = new GeneralCommandLine("cargo").withEnvironment("PATH", "/fixture/unchanged")
+    settings.toolchain.patchCommandLine(untouched, false, false)
+    assert untouched.environment["PATH"] == "/fixture/unchanged"
+    record("path.explicit-posix=passed")
+    // Outside the open project's roots: no direnv cache may conceal a bad PATH.
+    def probe = {
+        new GeneralCommandLine(settings.toolchain.toLocalPath("/run/current-system/sw/bin/bash"),
+            "-c", 'printf "%s" "$PATH"').withWorkingDirectory(root.parent)
+    }
+    for (parent in GeneralCommandLine.ParentEnvironmentType.values()) {
+        def inherited = probe().withParentEnvironmentType(parent)
+        settings.toolchain.patchCommandLine(inherited, false, true)
+        assert !inherited.environment.containsKey("PATH") : "Missing PATH override must remain absent"
+        if (parent == GeneralCommandLine.ParentEnvironmentType.NONE) {
+            assert !inherited.effectiveEnvironment.containsKey("PATH") : "Disabled inheritance must remain disabled"
+        } else {
+            def baseline = new CapturingProcessHandler(probe().withParentEnvironmentType(parent)).runProcess(15000)
+            def actual = new CapturingProcessHandler(inherited).runProcess(15000)
+            assert !baseline.timeout && !actual.timeout && baseline.exitCode == 0 && actual.exitCode == 0
+            // Keep environment values in memory, including assertion diagnostics.
+            if (actual.stdout != baseline.stdout) throw new AssertionError("WSL inherited PATH changed")
+        }
+    }
+    record("path.target-inheritance-and-none=passed")
     def provider = loader.loadClass("io.github.salatmaster.direnv.rust.EnvletRustToolchainProvider")
         .getConstructor().newInstance()
     def home = root.resolve(".devenv/profile/bin")

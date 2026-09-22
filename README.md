@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.1-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.1.2-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -45,6 +45,28 @@ change them manually. Envlet does not create language run/debug configurations.
 
 To roll back, disable or uninstall Envlet and restore any previous SDK selections.
 Its settings use `envlet.xml`; upstream settings remain separate.
+
+## direnv, devenv and host platforms
+
+Environment loading uses `direnv export json`; devenv is optional. An approved
+`.envrc` may use ordinary exports, nix-direnv or devenv. Go discovery queries the
+selected `go` executable and does not require a devenv profile.
+
+Rust discovery currently needs a directory exposing both PATH-selected `rustc`
+and `cargo`. A devenv profile supplies that directory, but another PATH directory
+can work too. Separate Nix packages with no common directory may require additional
+toolchain setup; Envlet does not generate a synthetic toolchain directory.
+
+| Host / environment | Current scope |
+| --- | --- |
+| Windows IDEA + WSL + devenv | Real SDK, Cargo native build, PATH and classic terminal checks |
+| Windows IDEA + WSL + plain direnv | Environment loading and Go discovery are generic; the Rust EEL/native-build fix currently requires the matching project `.devenv/profile/bin` |
+| Native Linux IDEA + direnv, with or without devenv | Implemented local environment/Go/Rust paths; Rust uses `RsLocalToolchain` and does not need the WSL workaround. Full NixOS desktop IDE validation remains outstanding |
+
+The `.devenv/profile/bin` restriction belongs to the WSL Rust compatibility adapter,
+not to Envlet's general environment loading. Native Linux still requires a working
+IDE installation, a discoverable direnv executable (or its configured absolute path),
+and the appropriate JetBrains language plugins.
 
 ## Development
 

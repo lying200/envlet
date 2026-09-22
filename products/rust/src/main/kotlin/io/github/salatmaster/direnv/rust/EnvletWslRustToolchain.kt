@@ -34,7 +34,19 @@ class EnvletWslRustToolchain private constructor(private val wsl: RsWslToolchain
                 }
             }
         }
-        return super.patchCommandLine(commandLine, withSudo, ensureToolchainInPath)
+        // The base implementation recognizes only Rust's own remote toolchain classes;
+        // otherwise it prepends a UNC home with the Windows PATH separator.
+        // Patch explicit POSIX PATH values only. With no override, EEL inherits the
+        // target's environment at launch (or none for ParentEnvironmentType.NONE).
+        // getParentEnvironment() here would read the Windows IDE's environment.
+        // Cargo/rustc themselves are launched by full path, independently of PATH.
+        if (ensureToolchainInPath) {
+            commandLine.environment["PATH"]?.let { path ->
+                val home = wsl.wslPath.linuxPath
+                if (path.substringBefore(':') != home) commandLine.environment["PATH"] = "$home:$path"
+            }
+        }
+        return super.patchCommandLine(commandLine, withSudo, false)
     }
 
     override val fileSeparator: String get() = wsl.fileSeparator

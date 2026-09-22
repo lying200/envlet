@@ -57,6 +57,16 @@ choice for an otherwise unrecognized toolchain type. See [runtime evidence and
 limits](../validation-env11.md); these observations supersede the direct WSL launch
 recommendation below for managed devenv profiles.
 
+The same concrete-type coupling exists in `RsToolchainBase.ensureToolchainInPath`:
+an unknown subclass receives the host's path syntax and parent environment.
+`GeneralCommandLine.getParentEnvironment()` reads the IDE host, while EEL remote
+inheritance happens later at process launch. As of 0.1.2-dev the adapter therefore
+handles explicit PATH overrides itself with POSIX paths and `:`, skipping the base
+PATH patch. Absent PATH remains absent, preserving EEL's target inheritance or
+`ParentEnvironmentType.NONE`; this intentionally does not add the toolchain to an
+otherwise inherited PATH. Cargo and rustc use complete executable paths. No extra
+remote environment fetch, shell wrapper or environment interception is introduced.
+
 The current official documentation supports WSL toolchains selected through a UNC path and separately configurable standard library sources: [Rust toolchain](https://www.jetbrains.com/help/rust/rust-toolchain.html). These are current binary APIs, not assumptions based on the archived open-source intellij-rust project. [R]
 
 | Operation | Confirmed entry point | Behavior / constraints |

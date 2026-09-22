@@ -119,3 +119,47 @@ and Cargo reload. The previous 0.1.0-dev ZIP is retained for rollback.
 Artifact: `build/distributions/envlet-0.1.1-dev.zip`.
 SHA-256: `e301ef80adf66830876383158aa0347304cea72094bb1c9c20e5442065aa5e33`.
 A matching copy is staged in the owner's Windows `Downloads/Envlet` directory.
+
+## PATH follow-up — 0.1.2-dev
+
+Design review identified another concrete-type check in the Rust base toolchain:
+its PATH patch treats an unknown subclass as local Windows. A direct adapter call
+with a synthetic POSIX PATH failed in the actual Windows IDEA using 0.1.1-dev,
+before direnv injection could mask the error. This was turned into a regression in
+the same `verify-rust-wsl.groovy` script before modifying production code.
+
+The adapter now prepends its POSIX home with `:` only when PATH is explicitly set
+and patching is requested. It preserves the supplied value, including spaces and
+empty components, and does not duplicate a home already at the front. When PATH is
+absent, it remains absent: EEL inherits the WSL environment at process launch, or
+no environment when parent inheritance is disabled. The adapter deliberately does
+not prepend its home to this implicit PATH; Cargo and rustc are addressed by full
+path. It never reads the Windows IDE's parent PATH. This avoids a synchronous remote
+environment fetch or an additional process customization hook.
+
+The expanded regression passed with the production 0.1.2-dev adapter:
+
+- Explicit POSIX PATH, empty PATH, spaces/empty components, repeated calls and
+  disabled patching, across every `ParentEnvironmentType`.
+- Missing PATH remains absent, including `NONE` (no parent inheritance).
+- Actual WSL processes outside the open project's roots receive the same inherited
+  PATH as the platform baseline, without direnv injection masking the result.
+- A synthetic environment canary is absent from command arguments. Actual inherited
+  environment values are compared only in memory and excluded from diagnostics.
+- Existing provider scope/disable and custom wrapper checks, native SQLite Cargo
+  sync/build in both terminal modes, and standard library reference resolution.
+
+These are Windows/WSL runtime observations. Native Linux environment loading and
+Go/Rust selection have local code paths, but this check does not establish full
+NixOS desktop validation. Plain direnv does not require devenv for environment
+loading; the project-profile restriction is specific to the WSL Rust adapter.
+
+`test buildPlugin` succeeded (164 tests, zero failures/errors/skips), followed by
+Plugin Verifier: Compatible with IU-262.10968.63, 5 deprecated and 140 experimental
+API usages, no Internal API usages. Final packaging includes the updated changelog;
+the production implementation is unchanged from the real-IDE regression build.
+
+Follow-up artifact: `build/distributions/envlet-0.1.2-dev.zip`.
+SHA-256: `29a243e49bf470d7494a24ab8c72dda9f05bff029aef10549c5aca60375b4033`.
+The matching Windows `Downloads/Envlet` copy is staged for Install Plugin from Disk;
+the running ordinary IDEA instance has not been restarted or overwritten.

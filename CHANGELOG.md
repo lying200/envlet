@@ -17,6 +17,10 @@ All notable changes to this plugin are documented here. The format follows
 - Fix ENV-11: use EEL for managed WSL devenv Rust profiles so Cargo sync and native
   builds inherit the compiler environment; select the Linux build-script helper and
   preserve custom Rust wrappers. Add a real IDEA/Cargo SQLite regression script.
+- Complete ENV-11 PATH handling: prepend the POSIX toolchain directory to explicit
+  PATH overrides without importing the Windows parent environment; preserve EEL
+  target inheritance when PATH is absent, including disabled inheritance. Cover
+  empty/space-containing PATH, repeated patching and actual uncached WSL processes.
 
 ## [0.2.4] - 2026-09-04
 
