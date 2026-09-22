@@ -1,5 +1,10 @@
+<!-- Modified for ENV-11: register the managed WSL toolchain provider. -->
 <idea-plugin>
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity implementation="io.github.salatmaster.direnv.rust.EnvletRustStartup"/>
+    </extensions>
+    <extensions defaultExtensionNs="org.rust">
+        <toolchainProvider implementation="io.github.salatmaster.direnv.rust.EnvletRustToolchainProvider"
+                           order="first"/>
     </extensions>
 </idea-plugin>

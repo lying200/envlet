@@ -46,6 +46,17 @@ Probe `go env -json GOROOT GOPATH GOMODCACHE GOVERSION GOOS GOARCH` **inside the
 
 ## Rust binding
 
+**ENV-11 follow-up (2026-09-23):** callable SDK setters alone did not establish native
+build support. `RsWslToolchain.patchCommandLine` forces the legacy `wsl.exe` launcher,
+which captures environment before `CommandLineEnvCustomizer` runs. Envlet now uses
+the public `RsToolchainProvider` / `RsToolchainBase` interfaces for matching project
+devenv profiles, preserving UNC executables for EEL. Rust's `RsEelToolchain` is
+`ApiStatus.Internal` in [R] and is deliberately not used. `RsPathManager.nativeHelper`
+is public and unmarked; the adapter uses its WSL selection to correct Cargo's helper
+choice for an otherwise unrecognized toolchain type. See [runtime evidence and
+limits](../validation-env11.md); these observations supersede the direct WSL launch
+recommendation below for managed devenv profiles.
+
 The current official documentation supports WSL toolchains selected through a UNC path and separately configurable standard library sources: [Rust toolchain](https://www.jetbrains.com/help/rust/rust-toolchain.html). These are current binary APIs, not assumptions based on the archived open-source intellij-rust project. [R]
 
 | Operation | Confirmed entry point | Behavior / constraints |

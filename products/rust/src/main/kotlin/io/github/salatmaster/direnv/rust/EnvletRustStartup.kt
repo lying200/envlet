@@ -1,3 +1,4 @@
+// Modified for ENV-11: use the project profile and EEL for native Cargo build environments.
 package io.github.salatmaster.direnv.rust
 
 import com.intellij.execution.wsl.WslPath
@@ -30,12 +31,16 @@ class EnvletRustStartup : ProjectActivity {
             val cargo = ToolchainCandidateResolver.resolveExecutable(environment.entries, cargoName, machine)
                 ?: return@watch
             // A devenv profile can expose two distinct Nix packages through one bin directory.
-            val bin = machine.splitPath(environment.entries["PATH"] ?: return@watch)
-                .filter { it.isNotBlank() }.mapNotNull(machine::path).firstOrNull { candidate ->
-                    Files.isRegularFile(candidate.resolve(rustcName)) && Files.isRegularFile(candidate.resolve(cargoName)) &&
-                        Files.isSameFile(candidate.resolve(rustcName), rustc) &&
-                        Files.isSameFile(candidate.resolve(cargoName), cargo)
-                } ?: return@watch
+            val profile = DirenvMachine.projectDir(project)?.resolve(EnvletRustToolchainProvider.PROFILE_BIN)
+            // Prefer a project-specific home only when it exposes the exact PATH-selected tools.
+            // The provider can then select EEL without affecting another project's shared Nix SDK.
+            val candidates = listOfNotNull(profile) + machine.splitPath(environment.entries["PATH"] ?: return@watch)
+                .filter { it.isNotBlank() }.mapNotNull(machine::path)
+            val bin = candidates.firstOrNull { candidate ->
+                Files.isRegularFile(candidate.resolve(rustcName)) && Files.isRegularFile(candidate.resolve(cargoName)) &&
+                    Files.isSameFile(candidate.resolve(rustcName), rustc) &&
+                    Files.isSameFile(candidate.resolve(cargoName), cargo)
+            } ?: return@watch
             val sysroot = sync.probe(environment, rustc, listOf("--print", "sysroot"))?.trim()
                 ?.takeIf { it.isNotBlank() }?.let(machine::path) ?: return@watch
             if (sync.probe(environment, cargo, listOf("--version")) == null) return@watch
@@ -44,7 +49,9 @@ class EnvletRustStartup : ProjectActivity {
                 sysroot.resolve("lib/rustlib/src/rust/library"),
             ).filterNotNull().firstOrNull { Files.isRegularFile(it.resolve("core/src/lib.rs")) }
             val wsl = WslPath.parseWindowsUncPath(bin.toString())
-            val toolchain = if (wsl != null) RsWslToolchain(wsl) else {
+            val toolchain = if (wsl != null) {
+                if (bin == profile) EnvletWslRustToolchain(wsl) else RsWslToolchain(wsl)
+            } else {
                 if (!DirenvMachine.isLocal(project)) return@watch
                 RsLocalToolchain(bin)
             }

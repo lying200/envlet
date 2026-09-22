@@ -14,6 +14,9 @@ All notable changes to this plugin are documented here. The format follows
 - Preserve native terminal direnv hooks and patch the known IDEA fish variable-scope collision.
 - Drop invalid cached environments and resolve nested `.envrc` scopes independently.
 - Add fish and cache regressions plus actual Windows IDEA / NixOS WSL validation records.
+- Fix ENV-11: use EEL for managed WSL devenv Rust profiles so Cargo sync and native
+  builds inherit the compiler environment; select the Linux build-script helper and
+  preserve custom Rust wrappers. Add a real IDEA/Cargo SQLite regression script.
 
 ## [0.2.4] - 2026-09-04
 

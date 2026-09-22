@@ -1,5 +1,8 @@
 # Self-use validation — 2026-09-22
 
+This records the original 0.1.0-dev checks. Native Cargo dependencies were not covered
+here; [ENV-11 follow-up](validation-env11.md) records that gap and the 0.1.1-dev fix.
+
 ## Environment
 
 - Windows IntelliJ IDEA 2026.2.3, IU-262.10968.63, existing installation.
