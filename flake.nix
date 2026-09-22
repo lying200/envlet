@@ -1,5 +1,6 @@
 {
-  description = "direnv support for JetBrains IDEs";
+  # Modified for Envlet: Java 25 plugin build and NixOS JBR runtime libraries.
+  description = "Envlet project environments for IntelliJ IDEA";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -34,6 +35,9 @@
               jdk25
               pinact
             ];
+            LD_LIBRARY_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux (
+              pkgs.lib.makeLibraryPath [ pkgs.freetype pkgs.fontconfig ]
+            );
           };
           pre-commit.settings = {
             package = pkgs.prek;

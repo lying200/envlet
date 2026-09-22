@@ -1,3 +1,4 @@
+// Modified for Envlet: verify directory scope and discard stale environments on reload.
 package io.github.salatmaster.direnv
 
 import com.intellij.openapi.components.Service
@@ -8,6 +9,7 @@ import com.intellij.ui.EditorNotifications
 import io.github.salatmaster.direnv.direnv.DirenvCli
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
 import io.github.salatmaster.direnv.direnv.DirenvOutcome
+import io.github.salatmaster.direnv.direnv.DirenvWatch
 import io.github.salatmaster.direnv.direnv.EelDirenvProcessRunner
 import io.github.salatmaster.direnv.direnv.GeneralCommandLineRunner
 import io.github.salatmaster.direnv.settings.DirenvSettings
@@ -19,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
+import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
@@ -82,15 +85,9 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
             return environment
         }
 
-        // A parent directory may already hold the environment covering this one.
-        var parent: Path? = normalised.parent
-        while (parent != null) {
-            cache[parent]?.let { environment ->
-                keyByQueriedDir[normalised] = parent
-                return environment
-            }
-            parent = parent.parent
-        }
+        // An unseen directory may contain its own .envrc. This cache-only method is also
+        // called on the EDT: do not walk the filesystem or guess from a parent cache entry.
+        // load() resolves the scope in the background and records a verified alias.
         return null
     }
 
@@ -109,9 +106,12 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
         return loadMutex.withLock {
             if (!force && cachedFor(normalised) != null) return@withLock currentState.get()
 
+            // Revocation, failure or cancellation must never leave the previous environment
+            // available to process injection while the replacement is being evaluated.
+            invalidate(normalised)
             publish(DirenvState.Loading)
             val outcome = withContext(Dispatchers.IO) { cli().export(normalised) }
-            val newState = applyOutcome(normalised, outcome)
+            val newState = withContext(Dispatchers.IO) { applyOutcome(normalised, outcome) }
             publish(newState)
             newState
         }
@@ -125,7 +125,21 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
             keyByQueriedDir[workingDir] = key
             // Register the files this environment depends on, so a change to flake.lock or an
             // external `direnv allow` triggers a reload.
-            DirenvWatchService.getInstance(project).updateWatches(key, environment.watches)
+            // Watch missing intermediate .envrc files too: creating a nested environment
+            // invalidates an alias which previously resolved to the parent environment.
+            val scopeWatches = mutableListOf<DirenvWatch>()
+            var directory: Path? = workingDir
+            while (directory != null && directory.startsWith(key)) {
+                val file = directory.resolve(ENVRC_FILE_NAME)
+                val exists = Files.exists(file)
+                val modtime = if (exists) Files.getLastModifiedTime(file).toInstant().epochSecond else 0L
+                scopeWatches += DirenvWatch(file, modtime, exists)
+                if (directory == key) break
+                directory = directory.parent
+            }
+            DirenvWatchService.getInstance(project).updateWatches(
+                workingDir, (environment.watches + scopeWatches).distinctBy { it.path },
+            )
             val diff = environment.diffAgainst(System.getenv())
             log.info(
                 "direnv loaded for $key: " +
@@ -166,6 +180,11 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
     /** Reloads the environment for [workingDir] from a non-suspending caller, e.g. an action. */
     fun scheduleReload(workingDir: Path) {
         scope.launch { load(workingDir, force = true) }
+    }
+
+    /** Resolves an unknown process directory without blocking its caller or forcing a reload. */
+    fun scheduleLoad(workingDir: Path) {
+        scope.launch { load(workingDir) }
     }
 
     /**

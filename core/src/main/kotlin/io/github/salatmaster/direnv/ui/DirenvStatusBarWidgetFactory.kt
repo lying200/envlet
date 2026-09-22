@@ -1,3 +1,4 @@
+// Modified for Envlet: independent UI registration.
 package io.github.salatmaster.direnv.ui
 
 import com.intellij.ide.DataManager
@@ -47,8 +48,8 @@ class DirenvStatusBarWidgetFactory : StatusBarWidgetFactory, WidgetPresentationF
     ): WidgetPresentation = DirenvStatusWidgetPresentation(context.project)
 
     companion object {
-        const val WIDGET_ID: String = "direnv.status"
-        const val ACTION_GROUP_ID: String = "direnv.actions"
+        const val WIDGET_ID: String = "envlet.status"
+        const val ACTION_GROUP_ID: String = "envlet.actions"
     }
 }
 

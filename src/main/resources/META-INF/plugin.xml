@@ -1,56 +1,16 @@
-<idea-plugin url="https://github.com/salatmaster/direnv-jetbrains-plugin" require-restart="false">
-    <id>io.github.salatmaster.direnv</id>
-    <name>direnv Everywhere</name>
-    <vendor email="abstractcoderx@gmail.com" url="https://github.com/salatmaster">salatmaster</vendor>
+<idea-plugin url="https://github.com/lying200/envlet" require-restart="false">
+    <id>io.github.lying200.envlet</id>
+    <name>Envlet</name>
+    <vendor url="https://github.com/lying200">lying200</vendor>
 
+    <!-- Modified for Envlet: independent identity and self-use scope. -->
     <description><![CDATA[
-        <p><b>Your <code>.envrc</code> environment, everywhere the IDE runs something.</b></p>
-
-        <p>You use <a href="https://direnv.net">direnv</a>. Your JDK comes from Nix, your toolchain
-        from Devbox, your credentials from a <code>.env</code> file the shell loads for you. In the
-        terminal, everything works &mdash; and then you open the IDE, and none of it exists.</p>
-
-        <p>This plugin makes that environment available to the things the IDE actually starts:</p>
-        <ul>
-          <li><b>Run and debug configurations</b> &mdash; every language, no per-runner support needed</li>
-          <li><b>The build process</b>, so compilation sees the same environment</li>
-          <li><b>Gradle and Maven</b> &mdash; sync, tasks, and the run configurations the IDE
-              delegates to Gradle by default</li>
-          <li><b>The terminal</b>, in WSL as well as on your own machine</li>
-          <li><b>External Tools</b>, File Watchers, and processes started by other plugins</li>
-        </ul>
-
-        <p><b>Scoped to the project, not the IDE.</b> The environment is resolved per project and
-        working directory and injected as each process starts, so two projects open side by side
-        keep separate environments and a nested <code>.envrc</code> gets its own. The IDE's own
-        process environment is never modified &mdash; which is what makes the isolation real rather
-        than approximate.</p>
-
-        <p><b>A JDK or Node interpreter from direnv is offered to the project.</b> Injecting
-        <code>PATH</code> does not help the IDE itself, which resolves toolchains from its own
-        settings &mdash; so indexing and inspections keep calling them missing while a terminal in
-        the same project finds them. Offered rather than applied: a Nix store path can vanish after
-        garbage collection, and rewriting your project SDK at that moment would break the project
-        with no explanation.</p>
-
-        <p><b>It keeps itself up to date.</b> Change <code>flake.lock</code> and the environment
-        reloads &mdash; not because the plugin knows about Nix, but because direnv reports every
-        file its environment depends on and all of them are watched. Run <code>direnv allow</code>
-        in an ordinary terminal and the IDE picks it up within seconds, with no button and no
-        restart.</p>
-
-        <p><b>Security is the default, not a setting.</b> An <code>.envrc</code> is arbitrary shell
-        code, so <code>direnv allow</code> is never invoked automatically under any setting,
-        untrusted projects never execute one at all, and variable values never reach logs, run
-        configurations or any file under <code>.idea/</code>. A built-in viewer shows which
-        variables were applied by <em>name</em> &mdash; knowing that <code>PGPASSWORD</code> was set
-        is useful; writing its value into a run configuration would put it straight into git.</p>
-
-        <p>Requires <code>direnv</code> installed and on <code>PATH</code> &mdash; on the machine
-        the project lives on, for a project in WSL or on a remote host. Implements
-        <a href="https://youtrack.jetbrains.com/issue/IJPL-11588">IJPL-11588</a>.
-        Known limitations are documented in the
-        <a href="https://github.com/salatmaster/direnv-jetbrains-plugin">README</a>.</p>
+        <p><b>Project environments, a little closer to your editor.</b></p>
+        <p>Envlet loads trusted direnv environments into IDE processes. This personal
+        fork focuses on NixOS WSL and devenv, with automatic Go and Rust toolchain configuration.</p>
+        <p>Derived from <a href="https://github.com/salatmaster/direnv-jetbrains-plugin">direnv Everywhere</a>
+        by salatmaster, under the Apache 2.0 license. See the
+        <a href="https://github.com/lying200/envlet">README</a> for validated behavior.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -96,17 +56,17 @@
         <projectService serviceImplementation="io.github.salatmaster.direnv.watch.DirenvWatchService"/>
         <vfs.asyncListener implementation="io.github.salatmaster.direnv.watch.DirenvVfsListener"/>
 
-        <statusBarWidgetFactory id="direnv.status"
+        <statusBarWidgetFactory id="envlet.status"
                                 implementation="io.github.salatmaster.direnv.ui.DirenvStatusBarWidgetFactory"/>
-        <notificationGroup id="direnv" displayType="BALLOON"/>
+        <notificationGroup id="envlet" displayType="BALLOON"/>
         <postStartupActivity implementation="io.github.salatmaster.direnv.ui.DirenvNotifier"/>
 
         <editorNotificationProvider
             implementation="io.github.salatmaster.direnv.ui.DirenvEditorBanner"/>
 
-        <projectConfigurable id="direnv.settings"
+        <projectConfigurable id="envlet.settings"
                              groupId="tools"
-                             displayName="direnv"
+                             displayName="Envlet"
                              instance="io.github.salatmaster.direnv.ui.DirenvConfigurable"/>
     </extensions>
 
@@ -124,24 +84,26 @@
 
     <!-- Optional: only loads in IDEs that have JavaScript support, which excludes IDEA Community. -->
     <depends optional="true" config-file="direnv-javascript.xml">JavaScript</depends>
+    <depends optional="true" config-file="envlet-go.xml">org.jetbrains.plugins.go</depends>
+    <depends optional="true" config-file="envlet-rust.xml">com.jetbrains.rust</depends>
 
     <actions>
-        <group id="direnv.actions" text="direnv" popup="true">
-            <action id="direnv.reload"
+        <group id="envlet.actions" text="Envlet" popup="true">
+            <action id="envlet.reload"
                     class="io.github.salatmaster.direnv.ui.DirenvReloadAction"
                     text="Reload direnv Environment"/>
-            <action id="direnv.open"
+            <action id="envlet.open"
                     class="io.github.salatmaster.direnv.ui.DirenvOpenEnvrcAction"
                     text="Open .envrc"/>
             <!-- Allow deliberately follows Open, so reviewing the file is the path of least
                  resistance rather than approving it blind. -->
-            <action id="direnv.allow"
+            <action id="envlet.allow"
                     class="io.github.salatmaster.direnv.ui.DirenvAllowAction"
                     text="Allow This .envrc"/>
-            <action id="direnv.show"
+            <action id="envlet.show"
                     class="io.github.salatmaster.direnv.ui.DirenvShowEnvironmentAction"
                     text="Show direnv Environment"/>
-            <action id="direnv.block"
+            <action id="envlet.block"
                     class="io.github.salatmaster.direnv.ui.DirenvBlockAction"
                     text="Block This .envrc"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>

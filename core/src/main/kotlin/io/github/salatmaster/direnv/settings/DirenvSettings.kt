@@ -15,7 +15,8 @@ import com.intellij.util.xmlb.XmlSerializerUtil
  * never reach disk, so the environment cache lives in memory in DirenvService instead.
  */
 @Service(Service.Level.PROJECT)
-@State(name = "DirenvSettings", storages = [Storage("direnv.xml")])
+// Modified for Envlet: keep fork settings independent of the upstream plugin.
+@State(name = "EnvletSettings", storages = [Storage("envlet.xml")])
 class DirenvSettings : PersistentStateComponent<DirenvSettings.State> {
 
     class State {
@@ -30,6 +31,16 @@ class DirenvSettings : PersistentStateComponent<DirenvSettings.State> {
 
         @JvmField
         var watchFiles: Boolean = true
+
+        /** The owner's shell already has direnv hooked; avoid preloading DIRENV_DIFF. */
+        @JvmField
+        var terminalUsesShellHook: Boolean = true
+
+        @JvmField
+        var autoGoToolchain: Boolean = true
+
+        @JvmField
+        var autoRustToolchain: Boolean = true
 
         /** Generous by default: a first nix or devbox build routinely takes minutes. */
         @JvmField

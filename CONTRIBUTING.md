@@ -1,5 +1,7 @@
 # Contributing
 
+Modified for Envlet: IDEA 262, optional Go/Rust adapters and focused validation.
+
 Thanks for considering a contribution. This document assumes no prior knowledge of the codebase.
 
 ## Building and testing
@@ -12,7 +14,7 @@ Thanks for considering a contribution. This document assumes no prior knowledge 
 ./gradlew runIde         # launch a sandbox IDE with the plugin installed
 ```
 
-The build provisions its own JVM 21 toolchain, so you do not need a specific JDK installed. The
+The build provisions its own JVM 25 toolchain, so you do not need a specific JDK installed. The
 first build downloads the IntelliJ Platform and takes a few minutes.
 
 `direnv` does **not** need to be installed to build or test: the test suite drives a fake process
@@ -26,12 +28,14 @@ runner. Install it if you want to exercise the plugin by hand in `runIde`.
 | `products/terminal` | terminal plugin | terminal environment injection |
 | `products/gradle` | Gradle plugin | Gradle build environment injection |
 | `products/java` | Java plugin | JDK suggestion |
+| `products/javascript` | JavaScript plugin | Node suggestion |
+| `products/go` | Go plugin | Go SDK and GOPATH synchronization |
+| `products/rust` | Rust plugin | Rust WSL toolchain and source synchronization |
 
 Gradle project paths match directory paths, so `products/terminal` is the project
 `:products:terminal`. Everything is compiled into a single jar; the split exists for one reason
 only, and it is a good one: `core` is compiled without any language plugin on its classpath, so it
-*cannot* accidentally use a class from the Java plugin and break the plugin in PyCharm. Verification
-runs against PyCharm Community precisely to keep that honest.
+*cannot* accidentally use a class from the Java plugin and break the plugin in PyCharm. Envlet currently verifies against IDEA 2026.2.3; other products have not been validated.
 
 Each product module owns its own `META-INF/direnv-<name>.xml`, next to the code it registers. The
 separate file is not a style choice: `<depends optional="true" config-file="...">` is the only way

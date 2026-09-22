@@ -1,0 +1,5 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="io.github.salatmaster.direnv.go.EnvletGoStartup"/>
+    </extensions>
+</idea-plugin>

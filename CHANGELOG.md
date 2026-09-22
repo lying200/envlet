@@ -6,6 +6,15 @@ All notable changes to this plugin are documented here. The format follows
 
 ## [Unreleased]
 
+### Envlet fork
+
+- Independent Envlet identity, settings and Apache-2.0 upstream attribution.
+- Target IDEA 2026.2.3 / build 262 with Java 25 and optional Go/Rust adapters.
+- Synchronize Go SDK/GOPATH and Rust WSL toolchain/standard library sources from direnv.
+- Preserve native terminal direnv hooks and patch the known IDEA fish variable-scope collision.
+- Drop invalid cached environments and resolve nested `.envrc` scopes independently.
+- Add fish and cache regressions plus actual Windows IDEA / NixOS WSL validation records.
+
 ## [0.2.4] - 2026-09-04
 
 ### Added

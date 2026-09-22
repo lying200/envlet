@@ -1,3 +1,4 @@
+// Modified for Envlet: resolve unknown directory scopes asynchronously.
 package io.github.salatmaster.direnv.inject
 
 import com.intellij.execution.configurations.GeneralCommandLine
@@ -9,6 +10,7 @@ import com.intellij.openapi.roots.ProjectRootManager
 import io.github.salatmaster.direnv.DirenvGuard
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
+import io.github.salatmaster.direnv.DirenvState
 import io.github.salatmaster.direnv.direnv.DirenvInternalMarker
 import io.github.salatmaster.direnv.project.DirenvProjectResolver
 import io.github.salatmaster.direnv.project.ProjectRoots
@@ -31,7 +33,8 @@ import java.nio.file.Paths
  * environment, with no working directory to place it by. See DirenvGradleExecutionHelperExtension.
  *
  * Called synchronously at process start, possibly on the EDT and possibly under a read lock, so it
- * serves an already-populated cache and never triggers a load. Warming the cache is the startup
+ * serves an already-populated cache synchronously; an unknown directory can be warmed asynchronously.
+ * Initial warming is the startup
  * activity's job.
  */
 @Suppress("UnstableApiUsage")
@@ -73,8 +76,12 @@ class DirenvCommandLineEnvCustomizer : CommandLineEnvCustomizer {
                 return
             }
 
-            val loaded = DirenvService.getInstance(project).cachedFor(workingDir)
+            val service = DirenvService.getInstance(project)
+            val loaded = service.cachedFor(workingDir)
             if (loaded == null) {
+                // Warm a newly encountered directory only after initial startup succeeded.
+                // Failed/blocked startup must not cause every process launch to retry direnv.
+                if (service.state() is DirenvState.Loaded) service.scheduleLoad(workingDir)
                 if (log.isDebugEnabled) {
                     log.debug("Not injecting into a process in $workingDir: no environment is loaded for it")
                 }

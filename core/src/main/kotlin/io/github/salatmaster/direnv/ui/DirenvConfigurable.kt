@@ -1,3 +1,4 @@
+// Modified for Envlet: independent UI registration.
 package io.github.salatmaster.direnv.ui
 
 import com.intellij.openapi.options.BoundConfigurable
@@ -12,7 +13,7 @@ import io.github.salatmaster.direnv.DirenvService
 import io.github.salatmaster.direnv.settings.DirenvSettings
 
 /** Settings page under Tools → direnv. */
-class DirenvConfigurable(private val project: Project) : BoundConfigurable("direnv") {
+class DirenvConfigurable(private val project: Project) : BoundConfigurable("Envlet") {
 
     /**
      * Applies the settings and runs direnv again with them.
@@ -60,6 +61,19 @@ class DirenvConfigurable(private val project: Project) : BoundConfigurable("dire
                             "external <code>direnv allow</code> are picked up too."
                     )
             }
+            row {
+                checkBox("Let the terminal's direnv hook load its environment")
+                    .bindSelected(state::terminalUsesShellHook)
+                    .comment("Requires direnv hook in your shell configuration. IDE toolchain detection remains active.")
+            }
+            row {
+                checkBox("Automatically configure Go from this project's environment")
+                    .bindSelected(state::autoGoToolchain)
+            }
+            row {
+                checkBox("Automatically configure Rust from this project's environment")
+                    .bindSelected(state::autoRustToolchain)
+            }
             row("Timeout (seconds):") {
                 intTextField(range = 1..3600)
                     .bindIntText(state::timeoutSeconds)
@@ -67,7 +81,7 @@ class DirenvConfigurable(private val project: Project) : BoundConfigurable("dire
                         "A first Nix or Devbox build can take minutes, which is why the default " +
                             "is deliberately generous."
                     )
-            }
+                }
         }
     }
 }

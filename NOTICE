@@ -1,0 +1,15 @@
+Envlet
+https://github.com/lying200/envlet
+
+Derived from direnv Everywhere by salatmaster:
+https://github.com/salatmaster/direnv-jetbrains-plugin
+Fork baseline: 53652832a89b21628e6b1f353adcf94536bfb651 (0.2.4).
+
+The upstream work is distributed under the Apache License, Version 2.0.
+Envlet modifications are distributed under the same license. See LICENSE.
+The retained io.github.salatmaster.direnv package names identify inherited code;
+Envlet is an independently maintained fork, not an upstream release.
+
+The fish-integration-262.fish test fixture is from JetBrains intellij-community,
+tag idea/262.10968.63, under Apache License 2.0. The plugin patches the matching
+IDE-provided script at runtime; it does not ship an obsolete integration bundle.

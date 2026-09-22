@@ -1,3 +1,4 @@
+// Modified for Envlet: repair the known fish integration scope collision.
 package io.github.salatmaster.direnv.terminal
 
 import com.intellij.openapi.diagnostic.Logger
@@ -6,6 +7,7 @@ import com.intellij.platform.eel.provider.asNioPath
 import io.github.salatmaster.direnv.DirenvGuard
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
+import io.github.salatmaster.direnv.settings.DirenvSettings
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.plugins.terminal.startup.MutableShellExecOptions
 import org.jetbrains.plugins.terminal.startup.ShellExecOptionsCustomizer
@@ -30,6 +32,8 @@ class DirenvShellExecOptionsCustomizer : ShellExecOptionsCustomizer {
     override fun customizeExecOptions(project: Project, shellExecOptions: MutableShellExecOptions) {
         try {
             if (!DirenvGuard.mayRun(project)) return
+
+            if (DirenvSettings.getInstance(project).state.terminalUsesShellHook) return
 
             val workingDir = resolveWorkingDirectory(project, shellExecOptions) ?: return
             val service = DirenvService.getInstance(project)

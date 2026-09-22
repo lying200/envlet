@@ -6,7 +6,14 @@ plugins {
     alias(libs.plugins.kotlin)
 }
 
-kotlin { jvmToolchain(21) }
+kotlin { jvmToolchain(25) }
+
+// Modified for Envlet: core fixtures need Java/platform, not every bundled Ultimate plugin.
+// Loading all bundled plugins in the test framework's shared classloader causes collisions
+// between obfuscated optional plugin classes before any test can run (IDEA 262).
+tasks.test {
+    systemProperty("idea.load.plugins.id", "com.intellij.java")
+}
 
 testing {
     suites {
@@ -40,7 +47,10 @@ dependencies {
     testCompileOnly(libs.kotlinx.serialization.json)
 
     intellijPlatform {
-        create(IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion")) {
+        // Modified for Envlet: IDEA 262 is unified and requires Java 25.
+        val localIde = providers.gradleProperty("localIdePath").orNull
+        if (localIde != null) local(localIde)
+        else create(IntelliJPlatformType.IntellijIdea, providers.gradleProperty("platformVersion")) {
             useInstaller = false
         }
         testFramework(TestFrameworkType.Platform)

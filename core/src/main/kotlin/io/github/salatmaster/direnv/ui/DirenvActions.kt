@@ -1,3 +1,4 @@
+// Modified for Envlet: independent UI registration.
 package io.github.salatmaster.direnv.ui
 
 import com.intellij.notification.NotificationGroupManager
@@ -18,7 +19,7 @@ import java.nio.file.Paths
 
 internal object DirenvNotifications {
 
-    private const val GROUP_ID = "direnv"
+    private const val GROUP_ID = "envlet"
 
     fun warn(project: Project, content: String, vararg actions: AnAction) =
         notify(project, content, NotificationType.WARNING, *actions)

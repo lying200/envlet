@@ -1,3 +1,4 @@
+// Modified for Envlet: independent UI registration.
 package io.github.salatmaster.direnv.java
 
 import com.intellij.notification.NotificationGroupManager
@@ -66,7 +67,7 @@ class DirenvJdkSuggester : ProjectActivity {
 
     private fun suggest(project: Project, home: Path) {
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("direnv")
+            .getNotificationGroup("envlet")
             .createNotification(
                 "direnv provides a JDK at $home, which differs from this project's SDK.",
                 NotificationType.INFORMATION,

@@ -1,3 +1,4 @@
+// Modified for Envlet: independent UI registration.
 package io.github.salatmaster.direnv.javascript
 
 import com.intellij.execution.wsl.WslPath
@@ -105,7 +106,7 @@ class DirenvNodeSuggester : ProjectActivity {
 
     private fun suggest(project: Project, interpreter: NodeJsInterpreter, description: String) {
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("direnv")
+            .getNotificationGroup("envlet")
             .createNotification(
                 "direnv provides Node at $description, which differs from this project's interpreter.",
                 NotificationType.INFORMATION,
