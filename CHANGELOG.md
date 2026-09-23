@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-14 regressions introduced by Envlet's scope-cache changes: prepare unknown
+  directories before background process launch when no IDE lock is held, and bound
+  automatic retries per directory rather than gating on the last global load result.
+  Preserve upstream's cache-only UI/locked boundary and propagate launch cancellation.
+
 - Fix ENV-13: discover Rust tools independently and assemble project-owned SDK
   directories from executable links, removing the devenv-profile requirement for
   WSL builds. Bind providers only to current loaded environments; verify split/common

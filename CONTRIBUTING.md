@@ -66,8 +66,11 @@ These come from the plugin's security model. A change that breaks one will not b
 - **Never log or persist environment values.** Log names and counts. `DirenvEnvironment.toString()`
   hides both by design — do not add a way around it, and do not add a field to `DirenvSettings`
   capable of holding direnv output.
-- **Never block the EDT.** `DirenvCommandLineEnvCustomizer` runs synchronously at process start and
-  serves cache only; loading happens in coroutines.
+- **Never block the EDT or wait for direnv under an IDE read/write lock.** The upstream
+  `DirenvCommandLineEnvCustomizer` was entirely cache-only because its synchronous hook
+  can run in those contexts. Envlet retains that boundary: only background callers
+  without IDE locks may wait for directory preparation through the platform's coroutine
+  bridge. Do not restore unverified parent-cache fallback to avoid that wait.
 
 ## Testing expectations
 

@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.3-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.1.4-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -31,6 +31,12 @@ automatic Go/Rust management and terminal shell-hook mode default to enabled.
 Keep your existing fish `direnv hook` and turn on IDEA's **Terminal → Shell integration**.
 The terminal loads through its own hook, preserving devenv's startup output;
 IDE processes and SDK selection use Envlet's in-memory environment cache.
+Background process launches without IDE read/write locks resolve an uncached working
+directory before starting, including ordinary subdirectories after a reload. Calls
+on the UI thread or under IDE locks remain cache-only and schedule background warming;
+their first uncached call can still miss the environment. Failed directories retry
+on a later automatic attempt after 60 seconds; manual reload and watched file/approval
+changes bypass that delay. See [ENV-14](docs/validation-env14.md) for provenance and checks.
 
 On a successful environment load, Envlet queries `go env` for GOROOT/GOPATH and
 selects the corresponding WSL SDK. For Rust on WSL or native Linux, it independently

@@ -5,6 +5,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.ui.EditorNotifications
 import io.github.salatmaster.direnv.direnv.DirenvCli
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
@@ -14,6 +15,7 @@ import io.github.salatmaster.direnv.direnv.EelDirenvProcessRunner
 import io.github.salatmaster.direnv.direnv.GeneralCommandLineRunner
 import io.github.salatmaster.direnv.settings.DirenvSettings
 import io.github.salatmaster.direnv.watch.DirenvWatchService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -47,6 +49,8 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
 
     private val currentState = AtomicReference<DirenvState>(DirenvState.NotLoaded)
     private val loadMutex = Mutex()
+    private val failures = DirenvLoadFailures()
+    private val scheduledLoads = ConcurrentHashMap.newKeySet<Path>()
 
     /** Test seam: lets tests supply a CLI backed by a fake process runner. */
     var cliOverride: DirenvCli? = null
@@ -97,23 +101,53 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
      * Serialised through a mutex so that concurrent triggers — startup activity, a watched file
      * changing, an explicit reload — collapse into one direnv invocation instead of competing.
      */
-    suspend fun load(workingDir: Path, force: Boolean = false): DirenvState {
-        if (!DirenvGuard.mayRun(project)) return currentState.get()
+    suspend fun load(workingDir: Path, force: Boolean = false): DirenvState =
+        loadDirectory(workingDir, force, automatic = false)
 
+    /**
+     * Prepare an unknown directory before a background process starts. Failures are throttled
+     * per directory; the last result displayed in the status bar is not a loading policy.
+     * Explicit reloads and file/approval changes bypass this automatic retry delay.
+     */
+    suspend fun environmentForProcess(workingDir: Path): DirenvEnvironment? {
+        if (!DirenvGuard.mayRun(project)) return null
+        loadDirectory(workingDir, force = false, automatic = true)
+        return if (DirenvGuard.mayRun(project)) cachedFor(workingDir) else null
+    }
+
+    private suspend fun loadDirectory(workingDir: Path, force: Boolean, automatic: Boolean): DirenvState {
+        if (!DirenvGuard.mayRun(project)) return DirenvState.NotLoaded
         val normalised = workingDir.toAbsolutePath().normalize()
-        if (!force && cachedFor(normalised) != null) return currentState.get()
+        if (!force) cachedFor(normalised)?.let { return DirenvState.Loaded(it.diffAgainst(System.getenv())) }
 
         return loadMutex.withLock {
-            if (!force && cachedFor(normalised) != null) return@withLock currentState.get()
+            if (!DirenvGuard.mayRun(project)) return@withLock DirenvState.NotLoaded
+            if (!force) cachedFor(normalised)?.let { return@withLock DirenvState.Loaded(it.diffAgainst(System.getenv())) }
+            if (automatic) failures.recent(normalised)?.let { return@withLock it }
 
             // Revocation, failure or cancellation must never leave the previous environment
             // available to process injection while the replacement is being evaluated.
             invalidate(normalised)
             publish(DirenvState.Loading)
-            val outcome = withContext(Dispatchers.IO) { cli().export(normalised) }
-            val newState = withContext(Dispatchers.IO) { applyOutcome(normalised, outcome) }
-            publish(newState)
-            newState
+            try {
+                val outcome = withContext(Dispatchers.IO) { cli().export(normalised) }
+                if (!DirenvGuard.mayRun(project)) {
+                    publish(DirenvState.NotLoaded)
+                    return@withLock DirenvState.NotLoaded
+                }
+                val newState = withContext(Dispatchers.IO) { applyOutcome(normalised, outcome) }
+                if (newState !is DirenvState.Loaded) failures.record(normalised, newState)
+                publish(newState)
+                newState
+            } catch (e: CancellationException) {
+                invalidate(normalised)
+                publish(DirenvState.NotLoaded)
+                throw e
+            } catch (e: ProcessCanceledException) {
+                invalidate(normalised)
+                publish(DirenvState.NotLoaded)
+                throw e
+            }
         }
     }
 
@@ -184,7 +218,15 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
 
     /** Resolves an unknown process directory without blocking its caller or forcing a reload. */
     fun scheduleLoad(workingDir: Path) {
-        scope.launch { load(workingDir) }
+        val directory = workingDir.toAbsolutePath().normalize()
+        if (failures.recent(directory) != null || !scheduledLoads.add(directory)) return
+        scope.launch {
+            try {
+                environmentForProcess(directory)
+            } finally {
+                scheduledLoads.remove(directory)
+            }
+        }
     }
 
     /**
@@ -240,11 +282,14 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
         if (workingDir == null) {
             cache.clear()
             keyByQueriedDir.clear()
+            failures.clear()
             publish(DirenvState.NotLoaded)
             return
         }
         val normalised = workingDir.toAbsolutePath().normalize()
         val key = keyByQueriedDir.remove(normalised) ?: normalised
+        failures.remove(normalised)
+        failures.remove(key)
         cache.remove(key)
         keyByQueriedDir.entries.removeIf { it.value == key }
     }

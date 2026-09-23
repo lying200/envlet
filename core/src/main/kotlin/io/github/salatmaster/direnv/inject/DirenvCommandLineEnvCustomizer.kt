@@ -1,7 +1,11 @@
-// Modified for Envlet: resolve unknown directory scopes asynchronously.
+// Modified for Envlet: prepare unknown process directories where waiting is safe.
 package io.github.salatmaster.direnv.inject
 
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.progress.runBlockingMaybeCancellable
+import kotlinx.coroutines.CancellationException
 import com.intellij.execution.process.CommandLineEnvCustomizer
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
@@ -10,7 +14,6 @@ import com.intellij.openapi.roots.ProjectRootManager
 import io.github.salatmaster.direnv.DirenvGuard
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
-import io.github.salatmaster.direnv.DirenvState
 import io.github.salatmaster.direnv.direnv.DirenvInternalMarker
 import io.github.salatmaster.direnv.project.DirenvProjectResolver
 import io.github.salatmaster.direnv.project.ProjectRoots
@@ -33,9 +36,9 @@ import java.nio.file.Paths
  * environment, with no working directory to place it by. See DirenvGradleExecutionHelperExtension.
  *
  * Called synchronously at process start, possibly on the EDT and possibly under a read lock, so it
- * serves an already-populated cache synchronously; an unknown directory can be warmed asynchronously.
- * Initial warming is the startup
- * activity's job.
+ * serves cache only in those contexts. Background callers without a read/write lock can wait
+ * cancellably for the exact directory to be resolved before their environment is finalized.
+ * Startup warming reduces the number of launches which need to wait.
  */
 @Suppress("UnstableApiUsage")
 class DirenvCommandLineEnvCustomizer : CommandLineEnvCustomizer {
@@ -77,11 +80,22 @@ class DirenvCommandLineEnvCustomizer : CommandLineEnvCustomizer {
             }
 
             val service = DirenvService.getInstance(project)
-            val loaded = service.cachedFor(workingDir)
+            val application = ApplicationManager.getApplication()
+            val loaded = service.cachedFor(workingDir) ?: if (
+                !application.isDispatchThread && !application.isReadAccessAllowed && !application.isWriteAccessAllowed
+            ) {
+                // This legacy synchronous hook has no suspending counterpart. Bridge only from
+                // a background caller which holds no IDE lock, as in the upstream Gradle hook.
+                // Preserve cancellation when the caller has an indicator/job; plain process
+                // threads have neither. The CLI timeout still bounds those calls.
+                runBlockingMaybeCancellable { service.environmentForProcess(workingDir) }
+            } else {
+                // Preserve upstream's cache-only behavior on EDT/under locks. Never guess that
+                // a parent environment covers a child, and never wait while holding an IDE lock.
+                service.scheduleLoad(workingDir)
+                null
+            }
             if (loaded == null) {
-                // Warm a newly encountered directory only after initial startup succeeded.
-                // Failed/blocked startup must not cause every process launch to retry direnv.
-                if (service.state() is DirenvState.Loaded) service.scheduleLoad(workingDir)
                 if (log.isDebugEnabled) {
                     log.debug("Not injecting into a process in $workingDir: no environment is loaded for it")
                 }
@@ -94,6 +108,10 @@ class DirenvCommandLineEnvCustomizer : CommandLineEnvCustomizer {
             if (log.isDebugEnabled) {
                 log.debug("Injected ${loaded.entries.size} direnv variables into a process in $workingDir")
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ProcessCanceledException) {
+            throw e
         } catch (e: Exception) {
             // Throwing here would break process launch for the entire IDE, so failures are contained.
             log.warn("Failed to customize environment", e)

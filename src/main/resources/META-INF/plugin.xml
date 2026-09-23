@@ -48,7 +48,7 @@
         <commandLineEnvCustomizer
             implementation="io.github.salatmaster.direnv.inject.DirenvCommandLineEnvCustomizer"/>
 
-        <!-- The customizer above serves cache only, so the cache must be warmed on project open. -->
+        <!-- Warm the root cache for UI/locked callers and avoid on-demand waits on background launches. -->
         <postStartupActivity implementation="io.github.salatmaster.direnv.DirenvStartupActivity"/>
 
         <!-- Reload when a file direnv reported in DIRENV_WATCHES changes: not just .envrc, but

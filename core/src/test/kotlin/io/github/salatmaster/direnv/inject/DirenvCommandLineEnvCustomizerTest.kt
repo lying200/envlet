@@ -1,6 +1,12 @@
 package io.github.salatmaster.direnv.inject
 
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.progress.ProcessCanceledException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import io.github.salatmaster.direnv.DirenvLightTestCase
 import io.github.salatmaster.direnv.DirenvService
 import io.github.salatmaster.direnv.direnv.DirenvCli
@@ -20,6 +26,10 @@ class DirenvCommandLineEnvCustomizerTest : DirenvLightTestCase() {
     override fun setUp() {
         super.setUp()
         runner = FakeDirenvProcessRunner()
+        runner.beforeRun = {
+            assertThat(ApplicationManager.getApplication().isDispatchThread).isFalse()
+            assertThat(ApplicationManager.getApplication().isReadAccessAllowed).isFalse()
+        }
         customizer = DirenvCommandLineEnvCustomizer()
         service = DirenvService.getInstance(project)
         service.cliOverride = DirenvCli(
@@ -101,13 +111,103 @@ class DirenvCommandLineEnvCustomizerTest : DirenvLightTestCase() {
         customizer.customizeEnv(commandLineInProject(), environment)
 
         assertThat(environment).isEmpty()
+        runBlocking { service.environmentForProcess(workDir) }
     }
 
-    fun `test never invokes direnv itself`() {
+    fun `test EDT miss only loads on a background thread`() {
         val environment = mutableMapOf<String, String>()
 
         customizer.customizeEnv(commandLineInProject(), environment)
 
-        assertThat(runner.invocations).withFailMessage("customizer must serve cache only").isEmpty()
+        assertThat(environment).isEmpty()
+        runBlocking { service.environmentForProcess(workDir) }
+        assertThat(runner.invocations).hasSize(1)
     }
+    // Exercise the synchronous launch hook on the background thread used by process runners.
+    // Awaiting service.load(child) here would hide the first-launch regression.
+    private fun backgroundEnvironment(directory: Path): Map<String, String> =
+        ApplicationManager.getApplication().executeOnPooledThread<Map<String, String>> {
+            val environment = mutableMapOf<String, String>()
+            customizer.customizeEnv(GeneralCommandLine("echo").withWorkingDirectory(directory), environment)
+            environment
+        }.get(10, TimeUnit.SECONDS)
+
+    private fun rootExport(): String {
+        val file = workDir.resolve(".envrc").toString().replace("\\", "\\\\")
+        return """{"FOO":"parent","DIRENV_FILE":"$file"}"""
+    }
+
+    fun `test first background process in an unseen directory gets its environment`() {
+        val child = Files.createDirectories(workDir.resolve("first"))
+        loadEnvironment(rootExport())
+
+        assertThat(backgroundEnvironment(child)["FOO"]).isEqualTo("parent")
+    }
+
+    fun `test first background process after shared environment reload gets its environment`() {
+        val child = Files.createDirectories(workDir.resolve("reload"))
+        loadEnvironment(rootExport())
+        runBlocking { service.load(child) }
+        loadEnvironment(rootExport())
+        assertThat(service.cachedFor(child)).isNull()
+
+        assertThat(backgroundEnvironment(child)["FOO"]).isEqualTo("parent")
+    }
+
+    fun `test blocked directory does not prevent first process in a healthy directory`() {
+        val blocked = Files.createDirectories(workDir.resolve("blocked"))
+        val healthy = Files.createDirectories(workDir.resolve("healthy"))
+        loadEnvironment(rootExport())
+        runner.respondTo("export", DirenvProcessResult(1, "", "direnv: error $blocked/.envrc is blocked. Run `direnv allow` to approve its content"))
+        runBlocking { service.load(blocked) }
+        runner.respondTo("export", DirenvProcessResult(0, rootExport(), ""))
+
+        assertThat(backgroundEnvironment(healthy)["FOO"]).isEqualTo("parent")
+        assertThat(service.cachedFor(blocked)).isNull()
+    }
+
+    fun `test nested blocked envrc never receives the parent environment and retries are bounded`() {
+        val child = Files.createDirectories(workDir.resolve("unapproved"))
+        Files.writeString(child.resolve(".envrc"), "export FOO=child")
+        loadEnvironment(rootExport())
+        runner.respondTo("export", DirenvProcessResult(1, "", "direnv: error $child/.envrc is blocked. Run `direnv allow` to approve its content"))
+
+        repeat(3) { assertThat(backgroundEnvironment(child)).doesNotContainKey("FOO") }
+
+        assertThat(runner.invocations).hasSize(2) // Root once, blocked child once.
+        assertThat(service.cachedFor(workDir)?.entries?.get("FOO")).isEqualTo("parent")
+    }
+
+    fun `test read action miss returns without waiting for direnv`() {
+        val child = Files.createDirectories(workDir.resolve("read-action"))
+        loadEnvironment(rootExport())
+        val environment = ApplicationManager.getApplication().executeOnPooledThread<Map<String, String>> {
+            ReadAction.compute<Map<String, String>, RuntimeException> {
+                val result = mutableMapOf<String, String>()
+                customizer.customizeEnv(GeneralCommandLine("echo").withWorkingDirectory(child), result)
+                result
+            }
+        }.get(10, TimeUnit.SECONDS)
+        assertThat(environment).isEmpty()
+        runBlocking { service.environmentForProcess(child) }
+        assertThat(service.cachedFor(child)?.entries?.get("FOO")).isEqualTo("parent")
+    }
+
+    fun `test cancelled launch propagates cancellation and can load on a later attempt`() {
+        val child = Files.createDirectories(workDir.resolve("cancelled"))
+        loadEnvironment(rootExport())
+        runner.beforeRun = { throw ProcessCanceledException() }
+
+        // The platform's pooled-thread wrapper consumes PCE; capture at the hook boundary.
+        val cancellation = ApplicationManager.getApplication().executeOnPooledThread<Throwable?> {
+            runCatching {
+                customizer.customizeEnv(GeneralCommandLine("echo").withWorkingDirectory(child), mutableMapOf())
+            }.exceptionOrNull()
+        }.get(10, TimeUnit.SECONDS)
+        assertThat(cancellation).isInstanceOf(ProcessCanceledException::class.java)
+        assertThat(service.cachedFor(child)).isNull()
+        runner.beforeRun = null
+        assertThat(backgroundEnvironment(child)["FOO"]).isEqualTo("parent")
+    }
+
 }

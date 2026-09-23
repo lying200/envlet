@@ -31,3 +31,10 @@ standard library resolution, environment reload, and classic fish terminal start
 See [the validation record](validation.md) for exact observations and remaining limits.
 Cold first-load timeouts and reworked terminal UI validation are follow-up work;
 Marketplace publication remains outside this plan.
+
+## ENV-14 follow-up
+
+The first-directory launch and cross-directory failure regressions introduced in
+Envlet's scope-cache changes have a targeted fix for unlocked background launches.
+UI/locked calls retain the upstream cache-only constraint. See
+[provenance, implementation boundary and validation](validation-env14.md).

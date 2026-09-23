@@ -55,8 +55,9 @@ SHA-256: `2b036ccf41d089a1c415685844fb7b4574bc400eba5068ce2aad8bd2baf4aae7`.
   scripts are left unchanged with a warning; Windows projects with WSL terminals
   are outside the tested scope.
 - Language SDKs are project-level. Nested `.envrc` files do not get independent
-  module SDKs. The first process in an unseen subdirectory may start before its
-  environment has been asynchronously resolved; it receives no cached parent env.
+  module SDKs. In this original MVP, the first process in an unseen subdirectory
+  could start before its environment was resolved. ENV-14 fixes background launches
+  without IDE locks; UI/locked calls remain cache-only. See [the follow-up](validation-env14.md).
 - Disabling automatic management or losing a tool from PATH retains the last SDK
   paths. Failed/revoked loads discard cached environment values, but do not restore
   earlier manual SDK settings or stop already-running processes.
