@@ -14,6 +14,9 @@ import io.github.salatmaster.direnv.direnv.DirenvInternalMarker
 import io.github.salatmaster.direnv.direnv.DirenvProcessResult
 import io.github.salatmaster.direnv.direnv.FakeDirenvProcessRunner
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import io.github.salatmaster.direnv.DirenvState
 import java.nio.file.Paths
 import org.assertj.core.api.Assertions.assertThat
 
@@ -111,7 +114,7 @@ class DirenvCommandLineEnvCustomizerTest : DirenvLightTestCase() {
         customizer.customizeEnv(commandLineInProject(), environment)
 
         assertThat(environment).isEmpty()
-        runBlocking { service.environmentForProcess(workDir) }
+        awaitScheduledLoad(workDir)
     }
 
     fun `test EDT miss only loads on a background thread`() {
@@ -120,9 +123,17 @@ class DirenvCommandLineEnvCustomizerTest : DirenvLightTestCase() {
         customizer.customizeEnv(commandLineInProject(), environment)
 
         assertThat(environment).isEmpty()
-        runBlocking { service.environmentForProcess(workDir) }
+        awaitScheduledLoad(workDir)
         assertThat(runner.invocations).hasSize(1)
     }
+    // Wait for the load scheduled by the hook itself. Calling load() here could win the race
+    // and leave the scheduled coroutine to start only after the shared fixture is torn down.
+    private fun awaitScheduledLoad(directory: Path) = runBlocking {
+        withTimeout(5_000) {
+            while (service.cachedFor(directory) == null || service.state() !is DirenvState.Loaded) delay(10)
+        }
+    }
+
     // Exercise the synchronous launch hook on the background thread used by process runners.
     // Awaiting service.load(child) here would hide the first-launch regression.
     private fun backgroundEnvironment(directory: Path): Map<String, String> =
@@ -189,7 +200,7 @@ class DirenvCommandLineEnvCustomizerTest : DirenvLightTestCase() {
             }
         }.get(10, TimeUnit.SECONDS)
         assertThat(environment).isEmpty()
-        runBlocking { service.environmentForProcess(child) }
+        awaitScheduledLoad(child)
         assertThat(service.cachedFor(child)?.entries?.get("FOO")).isEqualTo("parent")
     }
 
