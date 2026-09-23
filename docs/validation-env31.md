@@ -3,6 +3,11 @@
 Validated on 2026-09-23 with Envlet 0.2.3-dev, Windows IDEA IU-262.10968.63,
 full Python 262.10968.63 and the disposable NixOS WSL Python fixture.
 
+Follow-up: [ENV-32](validation-env32.md) removes probed roots from SDK user-added
+paths entirely. It uses source-only index libraries and leaves normal interpreter
+mappings to Python's updater. This record describes the earlier mapping repair;
+the current regression still checks mapping correctness and repeated real Runs.
+
 ## Cause
 
 This was an Envlet SDK-construction omission, not a direnv limitation. Added SDK

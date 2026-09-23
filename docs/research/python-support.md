@@ -299,3 +299,31 @@ through normal synchronization also replaces old malformed mapping entries.
 In 262, `WslTargetEnvironment` itself delegates process creation to EEL. Seeing
 `EelTargetEnvironment` in a stack trace does not establish that a WSL SDK changed
 type. See [ENV-31 runtime evidence](../validation-env31.md).
+
+### Index roots versus runtime additions (ENV-32)
+
+ENV-31 corrected the local/target spelling of SDK added paths, but those paths
+have another platform meaning: Python copies all user-added SDK paths into Run's
+PYTHONPATH. The complete probe output must not be registered as user additions.
+Even explicit Run overrides then retain the root environment's paths through
+the IDE's prepared environment.
+
+The 262 `RootVisitorHost.visitOrderEntryRoots` resolves imports against both
+library SOURCES and CLASSES. `PythonCommandLineState.addLibrariesFromModule` and
+`TargetedPythonPaths.addLibrariesFromModule` append only library CLASSES to Run.
+Use a module library with SOURCES only for probed roots, updated in the existing
+guarded SDK publication write. Only modules using the selected SDK are changed;
+their content roots are already indexed and are omitted from the library.
+The Python updater remains responsible for ordinary SDK roots and skeletons, and
+does not own these module libraries. No SDK-updater listener or Run-time path
+subtraction is required. Existing Envlet SDK additional data is replaced during
+normal synchronization, removing its old programmatic user-added paths.
+Do not seed SDK mappings from the same probe either: the updater can treat mapped
+roots under a module as transferred source roots, which would reintroduce them
+when a Run enables source-root additions. Let the platform discover ordinary
+interpreter mappings instead.
+
+The generic AdditionalLibraryRootsProvider is insufficient here: Python's
+module import resolver walks module order entries, not arbitrary synthetic
+libraries. These module libraries use only public platform APIs; only necessary
+index paths persist. See [ENV-32 validation](../validation-env32.md).

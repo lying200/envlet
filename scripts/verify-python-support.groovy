@@ -22,7 +22,7 @@ def record={ report.append(it+'\n') }
 def waitUntil={ label, Closure ready ->
  def end=System.nanoTime()+TimeUnit.SECONDS.toNanos(90)
  while(!ready() && System.nanoTime()<end) Thread.sleep(200)
- assert ready():label
+ if(!ready()) { record('WAIT_TIMEOUT='+label); assert false:label }
 }
 def write={ Closure body -> ApplicationManager.application.invokeAndWait({ ApplicationManager.application.runWriteAction(body as Runnable) } as Runnable) }
 try {
@@ -33,20 +33,20 @@ try {
  def project=ProjectManagerEx.instanceEx.openProject(root,OpenProjectTask.build().withForceOpenInNewFrame(true))
  assert project!=null
  def module
- write {
-  def manager=com.intellij.openapi.module.ModuleManager.getInstance(project)
-  module=manager.modules ? manager.modules[0] : manager.newModule(root.resolve('python-smoke.iml'),'PYTHON_MODULE')
-  def model=com.intellij.openapi.roots.ModuleRootManager.getInstance(module).modifiableModel
-  if(!model.contentEntries) model.addContentEntry(VfsUtil.pathToUrl(project.basePath))
-  model.inheritSdk();model.commit()
+ waitUntil('fixture module loaded') {
+  ApplicationManager.application.runReadAction({
+   module=com.intellij.openapi.module.ModuleManager.getInstance(project).modules.find { !it.isDisposed() }
+  } as Runnable)
+  module!=null
  }
+ record('fixture-module-loaded=true')
  def service=project.getService(plugin.pluginClassLoader.loadClass('io.github.salatmaster.direnv.DirenvService'))
  def settings=project.getService(plugin.pluginClassLoader.loadClass('io.github.salatmaster.direnv.settings.DirenvSettings'))
  settings.state.autoGoToolchain=false;settings.state.autoRustToolchain=false
  waitUntil('direnv load') { service.cachedFor(root)!=null }
  Thread.sleep(5000)
  record('auto.projectSdk='+ProjectRootManager.getInstance(project).projectSdk?.sdkType?.name)
- module=com.intellij.openapi.module.ModuleManager.getInstance(project).modules.find { !it.disposed }
+ module=com.intellij.openapi.module.ModuleManager.getInstance(project).modules.find { !it.isDisposed() }
  record('auto.moduleSdk='+(module==null?'no-module':com.intellij.openapi.roots.ModuleRootManager.getInstance(module).sdk?.sdkType?.name))
  def exe=root.resolve('.venv/bin/python').toString()
  def script=root.resolve('probe.py').toString()
@@ -81,18 +81,27 @@ try {
  def configurationType=pythonClass('com.jetbrains.python.run.PythonConfigurationType').getInstance()
  def factory=configurationType.factory
  def cfg=factory.createTemplateConfiguration(project)
+ cfg.setModule(module)
  cfg.name='Envlet Python probe';cfg.setSdk(sdk);cfg.setUseModuleSdk(false)
  cfg.setScriptName(script);cfg.setWorkingDirectory(root.toString());cfg.setAddContentRoots(false);cfg.setAddSourceRoots(false)
  def distribution=com.intellij.execution.wsl.WslPath.parseWindowsUncPath(root.toString()).distribution
  def targetDataClass=pythonClass('com.jetbrains.python.target.PyTargetAwareAdditionalData')
  def checkSdkMappings={ String label ->
-  def paths=targetDataClass.getPathsAddedByUser(cfg.getSdk().sdkAdditionalData)
-  assert !paths.isEmpty()
-  assert paths.values().contains(linuxRoot) // cwd is in the fixture's probed sys.path
-  assert paths.keySet().any { !it.startsWith(root) } // stdlib/Nix paths outside the project
-  paths.each { local, remote ->
-   assert remote==distribution.getWslPath(local.toString()):'Incorrect SDK root mapping: '+label
+  def data=cfg.getSdk().sdkAdditionalData
+  assert targetDataClass.getPathsAddedByUser(data).isEmpty() // probe roots must not become runtime paths
+  def mappings=data.pathMappings.pathMappings
+  // A newly published SDK may still await the platform's first mapping refresh.
+  mappings.each { mapping ->
+   assert mapping.remoteRoot==distribution.getWslPath(mapping.localRoot):'Incorrect SDK root mapping: '+label
   }
+  def library=com.intellij.openapi.roots.ModuleRootManager.getInstance(module).orderEntries.find {
+   it instanceof com.intellij.openapi.roots.LibraryOrderEntry && it.libraryName=='Envlet Python search paths'
+  }?.library
+  assert library!=null
+  assert library.getFiles(com.intellij.openapi.roots.OrderRootType.CLASSES).length==0
+  def indexRoots=library.getFiles(com.intellij.openapi.roots.OrderRootType.SOURCES)
+  assert indexRoots.any { it.toNioPath()==root.resolve('extras') }
+  assert indexRoots.any { !it.toNioPath().startsWith(root) }
   record('sdk-mappings.'+label+'=true')
  }
  checkSdkMappings('initial')
@@ -133,11 +142,37 @@ try {
  def fileResult=Files.readString(root.resolve('python-run-env-file.json'))
  assert fileResult.contains('"envfile_override": true')
  assert fileResult.contains('"file_dependency": true')
+ assert fileResult.contains('"dependency": false') // explicit PYTHONPATH replaces root-only imports
  cfg.setEnvs([ENVLET_ENVFILE_MODE:'direct'])
  runPython(true,'env-file-direct')
  assert Files.readString(root.resolve('python-run-env-file-direct.json')).contains('"direct_override": true')
  cfg.setEnvFilePaths([])
+ cfg.setEnvs([PYTHONPATH:linuxRoot+'/file-extras'])
+ runPython(true,'direct-path')
+ def directPath=Files.readString(root.resolve('python-run-direct-path.json'))
+ assert directPath.contains('"dependency": false') && directPath.contains('"file_dependency": true')
+ cfg.setEnvs([PYTHONPATH:''])
+ runPython(true,'empty-path')
+ assert Files.readString(root.resolve('python-run-empty-path.json')).contains('"dependency": false')
+ write {
+  def model=com.intellij.openapi.roots.ModuleRootManager.getInstance(module).modifiableModel
+  def entry=model.contentEntries.find { it.file?.toNioPath()==root }
+  def url=VfsUtil.pathToUrl(root.resolve('ide-helper').toString())
+  if(!entry.sourceFolders.any { it.url==url }) entry.addSourceFolder(url,false)
+  model.commit()
+ }
+ cfg.setAddSourceRoots(true)
+ cfg.setEnvs([PYTHONPATH:linuxRoot+'/file-extras'])
+ runPython(true,'helpers')
+ def helperResult=Files.readString(root.resolve('python-run-helpers.json'))
+ assert helperResult.contains('"helper_dependency": true') && helperResult.contains('"dependency": false')
+ cfg.setAddSourceRoots(false)
  cfg.setEnvs([:])
+ cfg.setWorkingDirectory(root.resolve('replacement').toString())
+ runPython(true,'replacement-child')
+ def replaced=Files.readString(root.resolve('python-run-replacement-child.json'))
+ assert replaced.contains('"dependency": false') && replaced.contains('"file_dependency": true')
+ record('pythonpath-replacement=true')
  cfg.setWorkingDirectory(root.resolve('shared').toString())
  runPython(true,'shared-first')
  assert Files.readString(root.resolve('python-run-shared-first.json')).contains('"env": true')
@@ -194,8 +229,22 @@ try {
  cfg.setEnvFilePaths([])
  record('env-file-priority-and-unset=true')
  checkSdkMappings('final')
+ com.intellij.openapi.project.DumbService.getInstance(project).waitForSmartMode()
+ ApplicationManager.application.runReadAction({
+  def file=com.intellij.psi.PsiManager.getInstance(project).findFile(VfsUtil.findFile(root.resolve('probe.py'),false))
+  def imports=com.intellij.psi.util.PsiTreeUtil.findChildrenOfType(file,pythonClass('com.jetbrains.python.psi.PyImportElement'))
+  def dependency=imports.find { it.importedQName?.toString()=='envlet_fixture_dependency' }
+  assert dependency!=null && dependency.resolve()!=null // source-only library still supports Python resolution
+ } as Runnable)
+ record('index-import-resolution=true')
  signal('restore')
  waitUntil('restored') { def e=service.cachedFor(root); e!=null && !(e.entries.containsKey('HOME') && e.entries.get('HOME')==null) }
+ cfg.setAddSourceRoots(true)
+ cfg.setEnvs([PYTHONPATH:linuxRoot+'/file-extras'])
+ runPython(true,'helpers-after-refresh')
+ def refreshedHelpers=Files.readString(root.resolve('python-run-helpers-after-refresh.json'))
+ assert refreshedHelpers.contains('"helper_dependency": true') && refreshedHelpers.contains('"dependency": false')
+ cfg.setAddSourceRoots(false);cfg.setEnvs([:])
  def javaType=pythonClass('com.intellij.openapi.projectRoots.JavaSdk').getInstance()
  def javaSdk=javaType.createJdk('Envlet validation Java SDK '+System.nanoTime(),System.getProperty('java.home'),false)
  write {
@@ -212,6 +261,7 @@ try {
  assert Files.readString(root.resolve('python-run-true.json')).contains('\"env\": true')
  assert Files.readString(root.resolve('python-run-true.json')).contains('\"dependency\": true')
  record('ACCEPTANCE=true')
+ ApplicationManager.application.invokeAndWait({ project.save() } as Runnable)
  record('FINISHED')
 } catch(Throwable t) {
  record('ERROR='+t.class.name)

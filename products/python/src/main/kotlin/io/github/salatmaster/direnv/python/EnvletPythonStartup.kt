@@ -14,7 +14,6 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.backend.workspace.impl.WorkspaceModelInternal
-import com.intellij.util.PathMappingSettings
 import com.jetbrains.python.run.PythonInterpreterTargetEnvironmentFactory
 import com.jetbrains.python.sdk.PythonSdkAdditionalData
 import com.jetbrains.python.sdk.PythonSdkType
@@ -63,16 +62,11 @@ class EnvletPythonStartup : ProjectActivity {
                 else PyTargetAwareAdditionalData(flavor, root, configuration, null).apply {
                     val mapper = DirenvMachine.pathMapper(project)
                     interpreterPath = mapper.toDirenv(plan.executable) ?: return@watch
-                    // Added SDK roots are local VirtualFiles. Initialize their remote mapping
-                    // before Python's updater preserves them as user-provided paths.
-                    setPathMappings(PathMappingSettings(plan.roots.map { local ->
-                        val remote = mapper.toDirenv(local) ?: return@watch
-                        PathMappingSettings.PathMapping(local.toString(), remote)
-                    }))
+                    // The platform discovers ordinary interpreter mappings. Envlet's probe
+                    // paths belong only to the index library, not SDK runtime/transfer roots.
                 }
-            // sys.path was probed in direnv, not in the IDE's unrelated parent environment.
-            // Only SDK paths persist; there is no environment map in SDK additional data.
-            data.setAddedPathsFromVirtualFiles(plan.roots.mapNotNull { VfsUtil.findFile(it, true) }.toSet())
+            // Probe roots are for editor resolution, not unconditional Run PYTHONPATH additions.
+            val indexRoots = plan.roots.mapNotNull { VfsUtil.findFile(it, true) }
             val home = if (data is PyTargetAwareAdditionalData) data.sdkId else plan.executable.toString()
             val name = "Envlet Python (${project.locationHash})"
             val table = ProjectJdkTable.getInstance()
@@ -113,6 +107,7 @@ class EnvletPythonStartup : ProjectActivity {
                                 existing
                             }
                             roots.projectSdk = published
+                            PythonIndexLibrary.update(project, published, indexRoots)
                             published
                         }
                         // Only the published SDK owns background indexing. Updating a temporary

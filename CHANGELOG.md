@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-32: keep Python discovery paths in source-only module libraries instead
+  of SDK user-added runtime paths. Explicit Run PYTHONPATH and independent child
+  environments no longer inherit root-only dependencies; editor import resolution
+  remains available across SDK refreshes.
+
 - Fix ENV-31: initialize WSL SDK path mappings before adding Python search roots.
   Background SDK refresh can no longer preserve UNC paths as remote paths and
   break script/working-directory resolution when sys.path includes the project.

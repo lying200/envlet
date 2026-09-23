@@ -119,3 +119,11 @@ WSL Python SDK construction initializes local-to-target mappings before
 registering added paths. The SDK's normal replacement and background refresh
 remain responsible for existing metadata; no command rewriting or retry is added.
 See [cause and validation](validation-env31.md).
+
+## ENV-32 follow-up
+
+Python discovery roots belong to editor resolution, not SDK user-added runtime
+paths. Envlet manages a source-only module library alongside SDK selection so
+explicit Run PYTHONPATH and independent child environments can replace root
+search paths. Existing Run merging and the shared environment lifecycle remain
+unchanged. See [regression evidence](validation-env32.md).

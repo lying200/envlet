@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.2.3-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.2.4-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -67,6 +67,10 @@ probes the selected interpreter in the project root, and selects a Python SDK.
 Plain direnv and Nix/devenv environments use the same path; Envlet does not create
 virtual environments or install packages. It preserves an existing non-Python
 project SDK (for example a Java JDK); configure mixed-language modules manually.
+For modules using the selected SDK, discovered search paths are stored in an
+`Envlet Python search paths` source library for editor resolution. They are not
+SDK user-added paths and do not force the root environment's PYTHONPATH into
+every Run. Explicit overrides and independent child environments can replace it.
 
 Windows IDEA with a WSL project requires the full **Python** plugin, including
 its WSL interpreter integration; Python Community Edition alone is insufficient
@@ -92,6 +96,7 @@ and [API decisions](docs/research/python-support.md). Env-file regression checks
 are recorded in [ENV-29 validation](docs/validation-env29.md).
 
 To roll back, disable or uninstall Envlet and restore any previous SDK selections.
+Python's `Envlet Python search paths` module libraries can then be removed too.
 Its settings use `envlet.xml`; upstream settings remain separate.
 Generated SDKs require a writable project cache. Envlet writes an ignore file only
 inside `.direnv/envlet`, preserving the project's `.gitignore`. Tool changes create

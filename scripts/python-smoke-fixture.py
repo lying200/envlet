@@ -32,13 +32,24 @@ if args.mode == "prepare":
         raise SystemExit("Refusing to overwrite a non-fixture directory")
     root.mkdir(parents=True, exist_ok=True)
     marker.touch()
+    # Load a real module from disk; creating one during asynchronous project loading
+    # can be overwritten by JPS synchronization before SDK publication.
+    (root / ".idea").mkdir(exist_ok=True)
+    (root / ".idea/modules.xml").write_text('''<project version="4"><component name="ProjectModuleManager"><modules>
+<module fileurl="file://$PROJECT_DIR$/python-smoke.iml" filepath="$PROJECT_DIR$/python-smoke.iml" />
+</modules></component></project>''')
+    (root / "python-smoke.iml").write_text('''<module type="PYTHON_MODULE" version="4"><component name="NewModuleRootManager">
+<content url="file://$MODULE_DIR$" /><orderEntry type="inheritedJdk" /><orderEntry type="sourceFolder" forTests="false" />
+</component></module>''')
     for name in [".venv", ".venv-next"]:
         venv.EnvBuilder(with_pip=False, symlinks=True).create(root / name)
-    for name in ["extras", "file-extras", "fake-home", "shared", "blocked", ".control"]:
+    for name in ["extras", "file-extras", "fake-home", "shared", "blocked", "replacement", "ide-helper", ".control"]:
         (root / name).mkdir(exist_ok=True)
     (root / "extras/envlet_fixture_dependency.py").write_text('VALUE = "fixture-dependency"\n')
     (root / "shared/envlet_cwd_dependency.py").write_text('VALUE = "cwd-dependency"\n')
     (root / "file-extras/envlet_file_dependency.py").write_text('VALUE = "file-dependency"\n')
+    (root / "ide-helper/envlet_helper_dependency.py").write_text('VALUE = "helper-dependency"\n')
+    (root / "replacement/.envrc").write_text('export PYTHONPATH="$PWD/../file-extras"\n')
     (root / "run.env").write_text(f"ENVLET_ENVFILE_MODE=test\nPYTHONPATH={root}/file-extras\n")
     (root / "unset.env").write_text(f"HOME={root}/fake-home\nENVLET_ENVFILE_MODE=test\n")
     (root / ".envrc").write_text(
@@ -64,7 +75,12 @@ try:
     cwd_dependency = envlet_cwd_dependency.VALUE == "cwd-dependency"
 except ImportError:
     cwd_dependency = False
-result = dict(cwd_dependency=cwd_dependency, file_dependency=file_dependency,
+try:
+    import envlet_helper_dependency
+    helper_dependency = envlet_helper_dependency.VALUE == "helper-dependency"
+except ImportError:
+    helper_dependency = False
+result = dict(helper_dependency=helper_dependency, cwd_dependency=cwd_dependency, file_dependency=file_dependency,
               envfile_override=os.environ.get("ENVLET_ENVFILE_MODE") == "test",
               direct_override=os.environ.get("ENVLET_ENVFILE_MODE") == "direct",
               envfile_unset=os.environ.get("HOME") == str(Path(__file__).parent / "fake-home"),
@@ -75,6 +91,7 @@ Path(sys.argv[1]).write_text(json.dumps(result))
 ''')
     # Only this script-authored fixture is approved; the child deliberately stays blocked.
     direnv("allow")
+    subprocess.run(["direnv", "allow", str(root / "replacement")], check=True, capture_output=True)
     subprocess.run(["direnv", "deny", str(root / "blocked")], check=True, capture_output=True)
     print("Prepared and approved disposable fixture:", root)
 else:
