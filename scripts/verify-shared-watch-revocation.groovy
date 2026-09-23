@@ -1,4 +1,4 @@
-// ENV-18: authored disposable fixture only, isolated IDEA profile.
+// ENV-18/19: authored disposable fixture only, isolated IDEA profile.
 // An external controller runs direnv deny/allow after the control-file handshakes.
 // No manual service refresh or synthetic VFS event is sent after approval changes.
 import com.intellij.ide.plugins.PluginManagerCore
@@ -60,6 +60,10 @@ try {
         process.exitValue() == 0
     }
     waitUntil('root loaded') { service.cachedFor(root) != null }
+    if (Boolean.getBoolean('envlet.validation.ancestorEnvrc')) {
+        assert service.cachedFor(root).loadedRcPath == root.parent.resolve('.envrc')
+        record('project.uses-ancestor-envrc=true')
+    }
     def child = root.resolve('shared')
     service.scheduleLoad(child)
     waitUntil('shared child loaded') { service.cachedFor(child) != null }
@@ -84,6 +88,10 @@ try {
     Files.writeString(root.resolve('.control/ready-allow'), 'ready\n')
     waitUntil('controller restored approval') { Files.exists(root.resolve('.control/allowed')) }
     waitUntil('watcher restores root') { service.cachedFor(root) != null }
+    if (Boolean.getBoolean('envlet.validation.ancestorEnvrc')) {
+        assert service.cachedFor(root).loadedRcPath == root.parent.resolve('.envrc')
+        record('automatic-approval.project-alias-restored=true')
+    }
     assert injected()
     assert processProbe()
     record('automatic-approval.process-injection=true')

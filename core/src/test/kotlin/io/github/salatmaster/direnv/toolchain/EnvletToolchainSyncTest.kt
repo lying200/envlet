@@ -7,9 +7,12 @@ import io.github.salatmaster.direnv.DirenvState
 import io.github.salatmaster.direnv.DirenvStateListener
 import io.github.salatmaster.direnv.direnv.DirenvCli
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
+import io.github.salatmaster.direnv.direnv.DirenvWatch
+import io.github.salatmaster.direnv.direnv.DirenvWatchesCodec
 import io.github.salatmaster.direnv.direnv.DirenvProcessResult
 import io.github.salatmaster.direnv.direnv.FakeDirenvProcessRunner
 import io.github.salatmaster.direnv.settings.DirenvSettings
+import io.github.salatmaster.direnv.watch.DirenvWatchService
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -181,6 +185,40 @@ class EnvletToolchainSyncTest : DirenvLightTestCase() {
         project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(DirenvState.Failed("child"))
         finish(probe)
         assertThat(probes.tryReceive().isFailure).isTrue()
+    }
+
+    fun `test automatic refresh of ancestor envrc restores project cache and toolchain sync`() = ancestorRefresh(false)
+    fun `test polling ancestor environment restores project cache and toolchain sync`() = ancestorRefresh(true)
+
+    private fun ancestorRefresh(poll: Boolean) = runBlocking<Unit> {
+        // The fake CLI reports an ancestor .envrc; do not create files outside the test project.
+        val parentRc = workDir.parent.resolve(".envrc")
+        val escaped = parentRc.toString().replace("\\", "\\\\")
+        val dependency = Files.writeString(workDir.resolve("ancestor-input"), "fixture")
+        val modified = Files.getLastModifiedTime(dependency)
+        val watches = DirenvWatchesCodec.encode(listOf(DirenvWatch(dependency, modified.toInstant().epochSecond, true)))
+        runner.respondTo("export", DirenvProcessResult(0, """{"DIRENV_FILE":"$escaped","DIRENV_WATCHES":"$watches"}""", ""))
+        service.load(workDir)
+        val initial = nextProbe()
+        finish(initial)
+        assertThat(service.cachedFor(workDir)).isSameAs(initial.environment)
+
+        DirenvSettings.getInstance(project).state.watchFiles = true
+        if (poll) Files.setLastModifiedTime(dependency, java.nio.file.attribute.FileTime.fromMillis(modified.toMillis() + 60_000))
+        else DirenvWatchService.getInstance(project).handleChangedPaths(listOf(parentRc))
+        withTimeout(5_000) {
+            // Wait for the replacement to commit, independently of the alias being tested.
+            while (service.cachedFor(workDir.parent) == null ||
+                service.cachedFor(workDir.parent) === initial.environment) delay(10)
+        }
+        assertThat(service.cachedFor(workDir))
+            .withFailMessage("Automatic refresh replaced the ancestor environment but lost the project directory mapping")
+            .isSameAs(service.cachedFor(workDir.parent))
+        val replacement = nextProbe()
+        assertThat(replacement.environment).isSameAs(service.cachedFor(workDir))
+        assertThat(runner.invocations.filter { it.args.firstOrNull() == "export" }.map { it.workingDir })
+            .containsOnly(workDir)
+        finish(replacement)
     }
 
     fun `test publication guard prevents expired plans from writing SDK settings`() = runBlocking<Unit> {

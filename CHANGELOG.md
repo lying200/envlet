@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-19, introduced in ENV-18: invalidate watched environments by scope but
+  resolve them from an actual consumer directory. Projects using an ancestor
+  `.envrc` recover their cache mapping and Go/Rust synchronization after automatic
+  refresh; shared child aliases still require their own successful resolution.
+
 - Fix ENV-18, introduced in ENV-16: bind watches to explicit environment scopes,
   replace orphan shared-directory records after scope reloads, and reload every
   scope depending on a shared file. Approval revocation can no longer refresh an

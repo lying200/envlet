@@ -1,4 +1,4 @@
-// Modified for ENV-16: generation-checked commits and independent environment notifications.
+// Modified for ENV-19: one scope-refresh path for VFS and polling, with explicit consumer resolution.
 package io.github.salatmaster.direnv
 
 import com.intellij.openapi.components.Service
@@ -105,34 +105,45 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
             if (!force) cachedFor(normalised)?.let { return@withLock DirenvState.Loaded(it.diffAgainst(System.getenv())) }
             if (automatic) cache.recentFailure(normalised)?.let { return@withLock it }
 
-            val load = cache.begin(normalised)
-            deliverChanges()
-            try {
-                val prepared = withContext(Dispatchers.IO) { prepareOutcome(normalised, cli().export(normalised)) }
-                if (!DirenvGuard.mayRun(project)) {
-                    cache.cancel(load)
-                    deliverChanges()
-                    return@withLock DirenvState.NotLoaded
-                }
-                val committed = cache.complete(load, prepared.environment, prepared.state, prepared.watches, prepared.resolvedScope)
-                deliverChanges()
-                if (committed) {
-                    withContext(Dispatchers.IO) { DirenvWatchService.getInstance(project).refreshWatches() }
-                    prepared.state
-                } else DirenvState.NotLoaded
-            } catch (e: CancellationException) {
+            resolve(cache.begin(normalised))
+        }
+    }
+
+    /** File changes invalidate their scope but re-export from a real consumer's directory. */
+    internal suspend fun refreshScope(environmentScope: Path) = loadMutex.withLock {
+        if (!DirenvGuard.mayRun(project)) return@withLock
+        val load = cache.beginRefresh(environmentScope, DirenvMachine.projectDir(project)) ?: return@withLock
+        resolve(load)
+    }
+
+    /** Called only with loadMutex held. Cache metadata locks never cover this IO. */
+    private suspend fun resolve(load: DirenvCache.Load): DirenvState {
+        deliverChanges()
+        return try {
+            val prepared = withContext(Dispatchers.IO) { prepareOutcome(load.directory, cli().export(load.directory)) }
+            if (!DirenvGuard.mayRun(project)) {
                 cache.cancel(load)
                 deliverChanges()
-                throw e
-            } catch (e: ProcessCanceledException) {
-                cache.cancel(load)
-                deliverChanges()
-                throw e
-            } catch (e: Exception) {
-                cache.cancel(load)
-                deliverChanges()
-                throw e
+                return DirenvState.NotLoaded
             }
+            val committed = cache.complete(load, prepared.environment, prepared.state, prepared.watches, prepared.resolvedScope)
+            deliverChanges()
+            if (committed) {
+                withContext(Dispatchers.IO) { DirenvWatchService.getInstance(project).refreshWatches() }
+                prepared.state
+            } else DirenvState.NotLoaded
+        } catch (e: CancellationException) {
+            cache.cancel(load)
+            deliverChanges()
+            throw e
+        } catch (e: ProcessCanceledException) {
+            cache.cancel(load)
+            deliverChanges()
+            throw e
+        } catch (e: Exception) {
+            cache.cancel(load)
+            deliverChanges()
+            throw e
         }
     }
 

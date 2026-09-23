@@ -1,4 +1,4 @@
-// Modified for ENV-18: watches retain explicit scope ownership independently of cache aliases.
+// Modified for ENV-19: invalidate by scope, resolve from an actual consumer directory.
 package io.github.salatmaster.direnv
 
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
@@ -41,11 +41,31 @@ internal class DirenvCache {
     @Synchronized fun isLatest(change: Change): Boolean = revision == change.revision
 
     @Synchronized fun begin(directory: Path): Load {
-        check(active == null) { "Exports must be serialized by the service" }
         // Retained failure-recovery watches still know their scope after aliases are gone.
         // This is an invalidation hint only; cached() never trusts watch metadata for injection.
-        val knownScopes = watches.entries.mapValues { it.value.scope } + aliases
-        val key = knownScopes[directory] ?: directory
+        val knownScopes = knownScopes()
+        return begin(directory, knownScopes[directory] ?: directory, knownScopes)
+    }
+
+    /** A scope is an invalidation unit, not necessarily a CLI working directory.
+     * The project is a persistent consumer. Other invalidated aliases resolve on demand.
+     * Choosing a directory never restores its alias: only its next export can do that.
+     */
+    @Synchronized fun beginRefresh(scope: Path, projectDirectory: Path?): Load? {
+        val directories = watches.entries.filterValues { it.scope == scope }.keys
+        if (directories.isEmpty()) return null // The queued watch no longer owns an environment.
+        val knownScopes = knownScopes()
+        val preferred = projectDirectory?.takeIf {
+            it == scope || knownScopes[it] == scope || (knownScopes[it] == null && it.startsWith(scope))
+        }
+        val directory = preferred ?: directories.minWith(compareBy<Path> { it.nameCount }.thenBy { it.toString() })
+        return begin(directory, scope, knownScopes)
+    }
+
+    private fun knownScopes(): Map<Path, Path> = watches.entries.mapValues { it.value.scope } + aliases
+
+    private fun begin(directory: Path, key: Path, knownScopes: Map<Path, Path>): Load {
+        check(active == null) { "Exports must be serialized by the service" }
         val load = Load(directory, key, knownScopes)
         removeScope(key, directory, removeWatches = false)
         active = load

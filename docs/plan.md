@@ -64,3 +64,9 @@ The shared-watch regression introduced by ENV-16 is fixed with explicit scope
 ownership and all-dependent-scope refresh. The same regression test passes before
 ENV-16 and fails on d3b0be3; external deny/allow and actual WSL process injection
 are verified in IDEA. See [ENV-18 evidence](validation-env18.md).
+
+## ENV-19 follow-up
+
+Automatic refresh now distinguishes the invalidation scope from the direnv
+working directory, preserving project-root synchronization when `.envrc` lives
+above the opened project. See [ENV-19 contract and evidence](validation-env19.md).

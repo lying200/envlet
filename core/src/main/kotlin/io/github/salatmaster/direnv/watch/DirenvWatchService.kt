@@ -1,4 +1,4 @@
-// Modified for ENV-18: reload explicit environment scopes, including all shared dependents.
+// Modified for ENV-19: both watch paths delegate scope invalidation and consumer resolution to the service.
 package io.github.salatmaster.direnv.watch
 
 import com.intellij.openapi.Disposable
@@ -89,7 +89,7 @@ class DirenvWatchService(
                 if (service.watchSnapshot().revision != observedRevision) continue
                 for (target in stale) {
                     log.info("Reloading direnv environment for $target after a watched file changed")
-                    service.load(target, force = true)
+                    service.refreshScope(target)
                 }
             }
         }
@@ -142,7 +142,7 @@ class DirenvWatchService(
             val service = DirenvService.getInstance(project)
             for (target in targets) {
                 log.info("Reloading direnv environment for $target after a watched file changed")
-                service.load(target, force = true)
+                service.refreshScope(target)
             }
         }
     }

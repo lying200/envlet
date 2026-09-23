@@ -161,4 +161,68 @@ class DirenvCacheTest {
         cache.cancel(load)
         assertThat(cache.cached(root)).isSameAs(replacement)
     }
+
+    @Test fun `scope refresh revalidates the project directory without restoring shared aliases`() {
+        val parent = root.parent
+        val child = root.resolve("shared")
+        commit(root, parent)
+        commit(child, parent)
+        val load = cache.beginRefresh(parent, root)!!
+        assertThat(load.directory).isEqualTo(root)
+        assertThat(cache.cached(root)).isNull()
+        assertThat(cache.cached(child)).isNull()
+        val replacement = environment(root, parent)
+        assertThat(cache.complete(load, replacement, loaded, emptyList())).isTrue()
+        assertThat(cache.cached(root)).isSameAs(replacement)
+        assertThat(cache.cached(child)).isNull()
+    }
+
+    @Test fun `project consumer survives removal of its alias and watch during shared child reload`() {
+        val parent = root.parent
+        val child = root.resolve("shared")
+        commit(root, parent)
+        commit(child, parent)
+        commit(child, parent)
+        assertThat(cache.cached(root)).isNull()
+        assertThat(cache.watchSnapshot().entries.keys).containsExactly(child)
+        val load = cache.beginRefresh(parent, root)!!
+        assertThat(load.directory).isEqualTo(root)
+        cache.cancel(load)
+    }
+
+    @Test fun `refresh of an independent child uses its actual directory and preserves the root`() {
+        val original = commit(root)
+        val child = root.resolve("nested")
+        val working = child.resolve("app")
+        commit(working, child)
+        val load = cache.beginRefresh(child, root)!!
+        assertThat(load.directory).isEqualTo(working)
+        assertThat(cache.cached(root)).isSameAs(original)
+        cache.cancel(load)
+    }
+
+    @Test fun `known independent project scope is not selected for an ancestor refresh`() {
+        val original = commit(root)
+        val sibling = root.parent.resolve("sibling")
+        commit(sibling, root.parent)
+        val load = cache.beginRefresh(root.parent, root)!!
+        assertThat(load.directory).isEqualTo(sibling)
+        assertThat(cache.cached(root)).isSameAs(original)
+        cache.cancel(load)
+    }
+
+    @Test fun `scope refresh result is rejected when invalidated during export`() {
+        commit(root, root.parent)
+        val load = cache.beginRefresh(root.parent, root)!!
+        cache.invalidate(root.parent)
+        assertThat(cache.complete(load, environment(root, root.parent), loaded, emptyList())).isFalse()
+        assertThat(cache.cached(root)).isNull()
+        assertThat(cache.watchSnapshot().entries).isEmpty()
+    }
+
+    @Test fun `obsolete queued scope refresh cannot resurrect an invalidated environment`() {
+        commit(root, root.parent)
+        cache.invalidate(null)
+        assertThat(cache.beginRefresh(root.parent, root)).isNull()
+    }
 }
