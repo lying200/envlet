@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-29: Python WSL Run env-file variables now override direnv, while direct
+  Run variables retain highest priority. Both explicit sources satisfy unset
+  replacement checks. Reject environment scripts rather than executing them
+  twice to recover variable provenance; plain files use IDEA's parser.
+
 - Add ENV-24–28: optional Python interpreter discovery from the approved root
   environment, guarded SDK selection on WSL/native Linux, and transient WSL
   Python Run environment injection. Preserve non-Python project SDKs and reject

@@ -33,13 +33,17 @@ if args.mode == "prepare":
     root.mkdir(parents=True, exist_ok=True)
     marker.touch()
     for name in [".venv", ".venv-next"]:
-        venv.EnvBuilder(with_pip=False).create(root / name)
-    for name in ["extras", "shared", "blocked", ".control"]:
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(root / name)
+    for name in ["extras", "file-extras", "fake-home", "shared", "blocked", ".control"]:
         (root / name).mkdir(exist_ok=True)
     (root / "extras/envlet_fixture_dependency.py").write_text('VALUE = "fixture-dependency"\n')
+    (root / "file-extras/envlet_file_dependency.py").write_text('VALUE = "file-dependency"\n')
+    (root / "run.env").write_text(f"ENVLET_ENVFILE_MODE=test\nPYTHONPATH={root}/file-extras\n")
+    (root / "unset.env").write_text(f"HOME={root}/fake-home\nENVLET_ENVFILE_MODE=test\n")
     (root / ".envrc").write_text(
         'export VIRTUAL_ENV="$PWD/.venv"\nPATH_add "$VIRTUAL_ENV/bin"\n'
         'export PYTHONPATH="$PWD/extras"\nexport ENVLET_PYTHON_TEST=fixture-only\n'
+        'export ENVLET_ENVFILE_MODE=development\n'
     )
     (root / "blocked/.envrc").write_text("export ENVLET_UNAPPROVED_CHILD=1\n")
     (root / "probe.py").write_text('''import json, os, sys
@@ -49,7 +53,16 @@ try:
     dependency = envlet_fixture_dependency.VALUE == "fixture-dependency"
 except ImportError:
     dependency = False
-result = dict(venv=sys.prefix != sys.base_prefix,
+try:
+    import envlet_file_dependency
+    file_dependency = envlet_file_dependency.VALUE == "file-dependency"
+except ImportError:
+    file_dependency = False
+result = dict(file_dependency=file_dependency,
+              envfile_override=os.environ.get("ENVLET_ENVFILE_MODE") == "test",
+              direct_override=os.environ.get("ENVLET_ENVFILE_MODE") == "direct",
+              envfile_unset=os.environ.get("HOME") == str(Path(__file__).parent / "fake-home"),
+              venv=sys.prefix != sys.base_prefix,
               env=os.environ.get("ENVLET_PYTHON_TEST") == "fixture-only",
               dependency=dependency, executable=sys.executable)
 Path(sys.argv[1]).write_text(json.dumps(result))

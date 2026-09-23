@@ -97,3 +97,11 @@ run's actual working directory for WSL environment preparation. It reuses the
 existing cache and environment-change protocol. No Python-specific cache, shell
 wrapper or persisted environment map is added. See
 [implementation and actual validation](validation-env24.md).
+
+## ENV-29 follow-up
+
+Python WSL Run resolves plain env-file values and direct settings into one
+explicit override map for merging and unset handling. It uses the platform parser
+without adding cache or lifecycle state. Environment scripts are explicitly
+unsupported because replaying them would repeat side effects. See
+[regression evidence and boundary](validation-env29.md).

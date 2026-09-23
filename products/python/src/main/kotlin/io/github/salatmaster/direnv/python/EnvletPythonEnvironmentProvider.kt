@@ -43,14 +43,17 @@ class EnvletPythonEnvironmentProvider : PythonCommandLineTargetEnvironmentProvid
                 null
             } ?: return@onEnvironmentPrepared
             if (!DirenvGuard.mayRun(project) || service.cachedFor(cwd) !== environment) return@onEnvironmentPrepared
-            if (PythonRunEnvironment.requiresInheritedUnset(environment.entries, runParams.envs)) {
+            // Target preparation runs on the background launch thread. Resolve explicit
+            // sources only for a run receiving direnv, not an unrelated/blocked directory.
+            val explicit = PythonRunOverrides.read(runParams, runParams.envs)
+            if (PythonRunEnvironment.requiresInheritedUnset(environment.entries, explicit)) {
                 // Omitting an override would reveal the target's inherited value; an empty
                 // string would not be an unset either. Do not silently run with that value.
                 throw ExecutionException("Envlet: Python WSL Targets cannot remove inherited environment variables. " +
                     "Run this configuration from a direnv-loaded terminal instead.")
             }
             val original = pythonExecution.envs.mapValues { it.value.apply(target) }
-            val merged = PythonRunEnvironment.merge(original, environment.entries, runParams.envs, ":")
+            val merged = PythonRunEnvironment.merge(original, environment.entries, explicit, ":")
             pythonExecution.envs.clear()
             merged.forEach { (name, value) ->
                 pythonExecution.envs[name] = Function {

@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.2.0-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.2.1-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -71,8 +71,12 @@ project SDK (for example a Java JDK); configure mixed-language modules manually.
 Windows IDEA with a WSL project requires the full **Python** plugin, including
 its WSL interpreter integration; Python Community Edition alone is insufficient
 for this target. Native Linux uses a local Python SDK. WSL Python Run processes
-receive their own working directory's environment at launch, with explicit Run
-configuration values taking precedence and IDE helper PYTHONPATH entries retained.
+receive their own working directory's environment at launch. Direct Run variables
+override Run env files, which override direnv; IDE helper PYTHONPATH entries are retained.
+Env files can also replace a variable that direnv unsets. Plain env files use
+IDEA's parser. `.sh`/`.bat` environment scripts are rejected on this WSL path:
+the extension receives an already merged environment, and recovering script
+variables by executing the scripts a second time would cause duplicate side effects.
 Native Linux runs use the existing general process injector (direnv values take
 precedence there). Values are not saved into Run configurations.
 
@@ -84,7 +88,8 @@ console/package-manager processes, Debug and pytest have not been validated yet;
 SSH, Docker, native Windows Python SDK management and PyCharm itself are outside
 the tested scope. The Python adapter uses a small, reviewed set of Internal APIs
 and is bounded to IDE build 262. See [Python validation](docs/validation-env24.md)
-and [API decisions](docs/research/python-support.md).
+and [API decisions](docs/research/python-support.md). Env-file regression checks
+are recorded in [ENV-29 validation](docs/validation-env29.md).
 
 To roll back, disable or uninstall Envlet and restore any previous SDK selections.
 Its settings use `envlet.xml`; upstream settings remain separate.
