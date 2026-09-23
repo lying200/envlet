@@ -128,6 +128,9 @@ try {
  cfg.setWorkingDirectory(root.resolve('shared').toString())
  runPython(true,'shared-first')
  assert Files.readString(root.resolve('python-run-shared-first.json')).contains('"env": true')
+ // Script is in root; this module exists only in the working directory. No content/source roots.
+ assert Files.readString(root.resolve('python-run-shared-first.json')).contains('"cwd_dependency": true')
+ record('pythonpath-cwd-import=true')
  cfg.setWorkingDirectory(root.resolve('blocked').toString())
  runPython(true,'blocked-child')
  assert Files.readString(root.resolve('python-run-blocked-child.json')).contains('"env": false')

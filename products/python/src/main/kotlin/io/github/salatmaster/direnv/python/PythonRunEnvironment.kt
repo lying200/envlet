@@ -17,8 +17,12 @@ internal object PythonRunEnvironment {
             if (value == null) result.remove(name) else result[name] = value
         }
         if ("PYTHONPATH" !in explicit && direnv["PYTHONPATH"] != null) {
+            val seenPaths = mutableSetOf<String>()
+            // Whole empty values add no paths; empty entries in a nonempty value mean cwd.
+            // Keep those entries, including repeats: collapsing ":" to "" changes semantics.
             result["PYTHONPATH"] = listOfNotNull(direnv["PYTHONPATH"], original["PYTHONPATH"])
-                .flatMap { it.split(separator) }.filter(String::isNotEmpty).distinct().joinToString(separator)
+                .filter(String::isNotEmpty).flatMap { it.split(separator) }
+                .filter { it.isEmpty() || seenPaths.add(it) }.joinToString(separator)
         }
         result.putAll(explicit)
         // Python already incorporated explicit PYTHONPATH into its helper/content path list.

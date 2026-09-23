@@ -105,3 +105,10 @@ explicit override map for merging and unset handling. It uses the platform parse
 without adding cache or lifecycle state. Environment scripts are explicitly
 unsupported because replaying them would repeat side effects. See
 [regression evidence and boundary](validation-env29.md).
+
+## ENV-30 follow-up
+
+Python helper-path merging preserves meaningful empty entries (cwd) while
+ignoring whole empty values. This corrects the Python adapter introduced in
+ENV-24, without changing the shared environment lifecycle. See
+[path semantics and regression evidence](validation-env30.md).

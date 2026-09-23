@@ -37,12 +37,13 @@ if args.mode == "prepare":
     for name in ["extras", "file-extras", "fake-home", "shared", "blocked", ".control"]:
         (root / name).mkdir(exist_ok=True)
     (root / "extras/envlet_fixture_dependency.py").write_text('VALUE = "fixture-dependency"\n')
+    (root / "shared/envlet_cwd_dependency.py").write_text('VALUE = "cwd-dependency"\n')
     (root / "file-extras/envlet_file_dependency.py").write_text('VALUE = "file-dependency"\n')
     (root / "run.env").write_text(f"ENVLET_ENVFILE_MODE=test\nPYTHONPATH={root}/file-extras\n")
     (root / "unset.env").write_text(f"HOME={root}/fake-home\nENVLET_ENVFILE_MODE=test\n")
     (root / ".envrc").write_text(
         'export VIRTUAL_ENV="$PWD/.venv"\nPATH_add "$VIRTUAL_ENV/bin"\n'
-        'export PYTHONPATH="$PWD/extras"\nexport ENVLET_PYTHON_TEST=fixture-only\n'
+        'export PYTHONPATH="$PWD/extras:"\nexport ENVLET_PYTHON_TEST=fixture-only\n'
         'export ENVLET_ENVFILE_MODE=development\n'
     )
     (root / "blocked/.envrc").write_text("export ENVLET_UNAPPROVED_CHILD=1\n")
@@ -58,7 +59,12 @@ try:
     file_dependency = envlet_file_dependency.VALUE == "file-dependency"
 except ImportError:
     file_dependency = False
-result = dict(file_dependency=file_dependency,
+try:
+    import envlet_cwd_dependency
+    cwd_dependency = envlet_cwd_dependency.VALUE == "cwd-dependency"
+except ImportError:
+    cwd_dependency = False
+result = dict(cwd_dependency=cwd_dependency, file_dependency=file_dependency,
               envfile_override=os.environ.get("ENVLET_ENVFILE_MODE") == "test",
               direct_override=os.environ.get("ENVLET_ENVFILE_MODE") == "direct",
               envfile_unset=os.environ.get("HOME") == str(Path(__file__).parent / "fake-home"),

@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-30: preserve PYTHONPATH empty entries and their order when adding
+  Python IDE helper paths. Ignore whole empty values without adding cwd, and
+  retain repeated empty entries so a separator-only value cannot collapse to
+  an empty string. Nonempty paths still keep their first occurrence.
+
 - Fix ENV-29: Python WSL Run env-file variables now override direnv, while direct
   Run variables retain highest priority. Both explicit sources satisfy unset
   replacement checks. Reject environment scripts rather than executing them
