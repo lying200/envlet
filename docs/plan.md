@@ -70,3 +70,10 @@ are verified in IDEA. See [ENV-18 evidence](validation-env18.md).
 Automatic refresh now distinguishes the invalidation scope from the direnv
 working directory, preserving project-root synchronization when `.envrc` lives
 above the opened project. See [ENV-19 contract and evidence](validation-env19.md).
+
+## ENV-20/21 follow-up
+
+Confirmed approval refusal now invalidates its actual scope even when first
+discovered by an uncached child. Project Go/Rust probes explicitly use the IDEA
+project directory, independent of the latest export's provenance. See
+[state transitions, regression tests and actual IDEA evidence](validation-env20-21.md).

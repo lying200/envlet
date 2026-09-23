@@ -8,6 +8,14 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-20: a first-time child discovering Blocked/Denied now invalidates the
+  resolved scope and its aliases before publishing recovery watches and state.
+  Root process injection and stale SDK publication stop immediately, while later
+  approval can restore the environment through the watcher.
+- Fix ENV-21: project Go/Rust probes explicitly use the IDEA project directory
+  for both execution and `direnv exec`, independent of the last export directory.
+  A shared child module can no longer redirect project-level toolchain selection.
+
 - Fix ENV-19, introduced in ENV-18: invalidate watched environments by scope but
   resolve them from an actual consumer directory. Projects using an ancestor
   `.envrc` recover their cache mapping and Go/Rust synchronization after automatic

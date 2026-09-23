@@ -1,7 +1,6 @@
 // Added for ENV-17: real mapping/execution classification through the existing runner seam.
 package io.github.salatmaster.direnv.toolchain
 
-import io.github.salatmaster.direnv.direnv.DirenvEnvironment
 import io.github.salatmaster.direnv.direnv.DirenvPathMapper
 import io.github.salatmaster.direnv.direnv.DirenvProcessResult
 import io.github.salatmaster.direnv.direnv.FakeDirenvProcessRunner
@@ -13,11 +12,10 @@ import java.nio.file.Path
 
 class ToolchainProbeTest {
     private val root = Path.of("probe").toAbsolutePath()
-    private val environment = DirenvEnvironment.empty(root)
     private val runner = FakeDirenvProcessRunner()
     private var current = true
     private fun probe(mapper: DirenvPathMapper = DirenvPathMapper.SameMachine) =
-        ToolchainProbe(runner, mapper).run(environment, root.resolve("go"), listOf("env"),
+        ToolchainProbe(runner, mapper).run(root, root.resolve("go"), listOf("env"),
             "direnv", emptyMap(), 5000) { current }
 
     @Test fun `successful output is available to the parser but hidden from rendering`() {

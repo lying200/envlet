@@ -1,8 +1,7 @@
-// Added for ENV-17: classify probe outcomes without retaining unsafe failure output.
+// Modified for ENV-21: probe working directory is explicit, independent of export provenance.
 package io.github.salatmaster.direnv.toolchain
 
 import com.intellij.openapi.progress.ProcessCanceledException
-import io.github.salatmaster.direnv.direnv.DirenvEnvironment
 import io.github.salatmaster.direnv.direnv.DirenvExecutableNotFoundException
 import io.github.salatmaster.direnv.direnv.DirenvPathMapper
 import io.github.salatmaster.direnv.direnv.DirenvProcessRunner
@@ -33,18 +32,18 @@ sealed interface ToolchainProbeResult {
 /** Process/mapping seam shared by local and remote probes; no IDE SDK writes. */
 internal class ToolchainProbe(private val runner: DirenvProcessRunner, private val mapper: DirenvPathMapper) {
     fun run(
-        environment: DirenvEnvironment, executable: Path, arguments: List<String>,
+        workingDirectory: Path, executable: Path, arguments: List<String>,
         direnvExecutable: String, extraEnv: Map<String, String>, timeoutMs: Int,
         isCurrent: () -> Boolean,
     ): ToolchainProbeResult {
         if (!isCurrent()) return ToolchainProbeResult.Stale
         return try {
-            val cwd = mapper.toDirenv(environment.workingDir)
+            val cwd = mapper.toDirenv(workingDirectory)
                 ?: return ToolchainProbeResult.Failure(ToolchainReason.PATH_MAPPING)
             val tool = mapper.toDirenv(executable)
                 ?: return ToolchainProbeResult.Failure(ToolchainReason.PATH_MAPPING)
             val result = runner.run(direnvExecutable, listOf("exec", cwd, tool) + arguments,
-                environment.workingDir, extraEnv, timeoutMs)
+                workingDirectory, extraEnv, timeoutMs)
             when {
                 !isCurrent() -> ToolchainProbeResult.Stale
                 result.exitCode != 0 -> ToolchainProbeResult.Failure(ToolchainReason.NONZERO_EXIT, result.exitCode)

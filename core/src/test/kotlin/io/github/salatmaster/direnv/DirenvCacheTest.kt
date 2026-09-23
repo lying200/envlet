@@ -225,4 +225,38 @@ class DirenvCacheTest {
         cache.invalidate(null)
         assertThat(cache.beginRefresh(root.parent, root)).isNull()
     }
+
+    @Test fun `approval refusal clears resolved scope aliases and publishes safe invalidation`() {
+        val shared = root.resolve("shared")
+        val independent = root.resolve("independent")
+        commit(root)
+        commit(shared, root)
+        val independentEnvironment = commit(independent)
+        val unknown = root.resolve("unknown")
+        val load = cache.begin(unknown)
+        changes()
+        val recovery = listOf(DirenvWatch(root.resolve("allow-stamp"), 0, false))
+        assertThat(cache.complete(load, null, DirenvState.Denied(root.resolve(".envrc").toString()), recovery, root)).isTrue()
+        assertThat(cache.cached(root)).isNull()
+        assertThat(cache.cached(shared)).isNull()
+        assertThat(cache.cached(independent)).isSameAs(independentEnvironment)
+        assertThat(cache.watchSnapshot().entries.keys).containsExactlyInAnyOrder(independent, unknown)
+        assertThat(cache.watchSnapshot().entries[unknown]?.files).isEqualTo(recovery)
+        val event = changes().single()
+        assertThat(event.environment?.scope).isEqualTo(root)
+        assertThat(event.state).isInstanceOf(DirenvState.Denied::class.java)
+        assertThat(event.environment.toString()).doesNotContain("env16-private-canary", "SECRET")
+    }
+
+    @Test fun `approval refusal invalidated during export cannot publish watches or a newer failure`() {
+        commit(root)
+        val load = cache.begin(root.resolve("unknown"))
+        cache.invalidate(root)
+        changes()
+        assertThat(cache.complete(load, null, DirenvState.Denied(root.resolve(".envrc").toString()),
+            listOf(DirenvWatch(root.resolve("old-stamp"), 0, false)), root)).isFalse()
+        assertThat(cache.watchSnapshot().entries).isEmpty()
+        assertThat(cache.recentFailure(load.directory)).isNull()
+        assertThat(changes()).isEmpty()
+    }
 }

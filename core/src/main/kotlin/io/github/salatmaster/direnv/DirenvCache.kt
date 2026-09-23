@@ -1,4 +1,4 @@
-// Modified for ENV-19: invalidate by scope, resolve from an actual consumer directory.
+// Modified for ENV-20: confirmed approval refusal invalidates the resolved scope atomically.
 package io.github.salatmaster.direnv
 
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
@@ -85,25 +85,40 @@ internal class DirenvCache {
         val unknownFailedScope = environment == null && resolvedScope == null && load.knownScopes[load.directory] == null
         if (load.rejected || key in load.invalidatedScopes ||
             (unknownFailedScope && load.invalidatedScopes.any { load.directory.startsWith(it) })) return false
+
+        if (environment == null && state.needsApproval && resolvedScope != null) {
+            // A first-time child can discover refusal of an already cached parent scope.
+            // Revoke that scope before publishing its new watch baseline or UI state.
+            removeScope(key, load.directory, removeWatches = false)
+            failures.record(load.directory, state)
+            updateWatches(load.directory, key, newWatches, replaceScope = true)
+            changed(key, state)
+            return true
+        }
+
         if (environment != null) {
             environments[key] = environment
             aliases[load.directory] = key
         } else {
             failures.record(load.directory, state)
         }
+        updateWatches(load.directory, key, newWatches, replaceScope = key == load.invalidatedScope)
+        changed(if (environment != null) key else null, state, environmentChanged = environment != null)
+        return true
+    }
+
+    private fun updateWatches(directory: Path, key: Path, newWatches: List<DirenvWatch>?, replaceScope: Boolean) {
         if (newWatches != null) {
             // A reload invalidated all aliases in this scope. Replace its old watch records
             // too; otherwise orphan queried directories survive with obsolete dependencies.
             // First discovery of a NEW alias into an existing scope keeps the other aliases'
             // watches, including missing intermediate .envrc files.
-            val retained = if (key == load.invalidatedScope) watches.entries.filterValues { it.scope != key }
+            val retained = if (replaceScope) watches.entries.filterValues { it.scope != key }
                 else watches.entries
             val nextRevision = watches.revision + 1
             watches = Watches(nextRevision, retained +
-                (load.directory to WatchSet(key, nextRevision, newWatches.toList())))
+                (directory to WatchSet(key, nextRevision, newWatches.toList())))
         }
-        changed(if (environment != null) key else null, state, environmentChanged = environment != null)
-        return true
     }
 
     @Synchronized fun cancel(load: Load) {

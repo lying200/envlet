@@ -1,4 +1,4 @@
-// Modified for ENV-16: subscribe to committed environment changes, independently of UI status.
+// Modified for ENV-21: project probes use the project directory, not the last export directory.
 package io.github.salatmaster.direnv.toolchain
 
 import com.intellij.openapi.application.ApplicationManager
@@ -12,6 +12,7 @@ import io.github.salatmaster.direnv.DirenvService
 import io.github.salatmaster.direnv.DirenvEnvironmentChange
 import io.github.salatmaster.direnv.DirenvEnvironmentListener
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
+import io.github.salatmaster.direnv.direnv.DirenvProcessRunner
 import io.github.salatmaster.direnv.direnv.EelDirenvProcessRunner
 import io.github.salatmaster.direnv.direnv.GeneralCommandLineRunner
 import io.github.salatmaster.direnv.settings.DirenvSettings
@@ -99,11 +100,20 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
 
     /** Run the selected tool inside direnv itself, including its unset-variable semantics. */
     suspend fun probe(environment: DirenvEnvironment, executable: Path, arguments: List<String>): ToolchainProbeResult =
+        probe(environment, executable, arguments,
+            if (DirenvMachine.isLocal(project)) GeneralCommandLineRunner() else EelDirenvProcessRunner(project))
+
+    /** Same project probe with an explicit process adapter, also used by cross-component tests. */
+    internal suspend fun probe(
+        environment: DirenvEnvironment, executable: Path, arguments: List<String>, runner: DirenvProcessRunner,
+    ): ToolchainProbeResult =
         withContext(Dispatchers.IO) {
+            if (!isCurrent(environment)) return@withContext ToolchainProbeResult.Stale
+            val projectDirectory = DirenvMachine.projectDir(project)
+                ?: return@withContext ToolchainProbeResult.Failure(ToolchainReason.PATH_MAPPING)
             val settings = DirenvSettings.getInstance(project)
-            val runner = if (DirenvMachine.isLocal(project)) GeneralCommandLineRunner() else EelDirenvProcessRunner(project)
             ToolchainProbe(runner, DirenvMachine.pathMapper(project)).run(
-                environment, executable, arguments, settings.state.executablePath,
+                projectDirectory, executable, arguments, settings.state.executablePath,
                 settings.state.extraEnv.toMap(), settings.timeoutMs(),
             ) { isCurrent(environment) }
         }

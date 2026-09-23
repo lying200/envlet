@@ -1,4 +1,4 @@
-// Added for ENV-15: exercise real service notifications while SDK synchronization is suspended.
+// Modified for ENV-20/21: cross-component approval and project probe directory regressions.
 package io.github.salatmaster.direnv.toolchain
 
 import io.github.salatmaster.direnv.DirenvLightTestCase
@@ -249,6 +249,100 @@ class EnvletToolchainSyncTest : DirenvLightTestCase() {
         sync.watch({ true }) { late.complete(it) }
 
         assertThat(withTimeout(5_000) { late.await() }).isSameAs(first.environment)
+    }
+
+    fun `test first child observing denied root invalidates cached root`() = sharedApprovalRefusal(false)
+    fun `test first child observing blocked root invalidates cached root`() = sharedApprovalRefusal(true)
+
+    private fun sharedApprovalRefusal(blocked: Boolean) = runBlocking<Unit> {
+        val rc = Files.writeString(workDir.resolve(".envrc"), "export REVIEW_FIXTURE=1")
+        val stamp = Files.createDirectories(workDir.resolve("review/direnv/deny")).resolve("stamp")
+        Files.deleteIfExists(stamp) // The light fixture can reuse its directory between methods.
+        fun payload(): String {
+            val watches = listOf(rc, stamp).map {
+                val exists = Files.exists(it)
+                DirenvWatch(it, if (exists) Files.getLastModifiedTime(it).toInstant().epochSecond else 0, exists)
+            }
+            val escaped = rc.toString().replace("\\", "\\\\")
+            return """{"DIRENV_FILE":"$escaped","DIRENV_WATCHES":"${DirenvWatchesCodec.encode(watches)}"}"""
+        }
+        runner.respondTo("export", DirenvProcessResult(0, payload(), ""))
+        service.load(workDir)
+        val original = nextProbe()
+        val child = Files.createDirectories(workDir.resolve("first-visit"))
+        if (blocked) Files.setLastModifiedTime(rc, java.nio.file.attribute.FileTime.fromMillis(Files.getLastModifiedTime(rc).toMillis() + 60_000))
+        else Files.writeString(stamp, "denied")
+        runner.respondTo("export", DirenvProcessResult(if (blocked) 1 else 0, payload(),
+            if (blocked) "direnv: error $rc is blocked." else ""))
+        assertThat(service.environmentForProcess(child)).isNull()
+        assertThat(service.state().needsApproval).isTrue()
+
+        // Inspect the same committed baselines used by the watcher, without waiting for a poll.
+        val registry = io.github.salatmaster.direnv.watch.DirenvWatchRegistry()
+        service.watchSnapshot().entries.values.groupBy { it.scope }.forEach { (scope, records) ->
+            registry.replace(scope, records.sortedBy { it.revision }.flatMap { it.files }.associateBy { it.path }.values.toList())
+        }
+        assertThat(registry.staleTargets()).isEmpty()
+        org.assertj.core.api.SoftAssertions.assertSoftly { checks ->
+            checks.assertThat(service.cachedFor(workDir)).describedAs("revoked root cache").isNull()
+            checks.assertThat(sync.isCurrent(original.environment)).describedAs("old root still current").isFalse()
+            checks.assertThat(sync.applyIfCurrent(original.environment, { true }) {}).describedAs("old SDK publication allowed").isFalse()
+        }
+        withTimeout(5_000) { original.job.join() }
+        assertThat(original.job.isCancelled).isTrue()
+        assertThat(service.watchSnapshot().entries.keys).containsExactly(child)
+        assertThat(service.watchSnapshot().entries[child]?.scope).isEqualTo(workDir)
+
+        // A later external approval must still recover the root through the real watcher.
+        Files.deleteIfExists(stamp)
+        runner.respondTo("export", DirenvProcessResult(0, payload(), ""))
+        DirenvSettings.getInstance(project).state.watchFiles = true
+        DirenvWatchService.getInstance(project).handleChangedPaths(listOf(rc, stamp))
+        val restored = nextProbe()
+        assertThat(restored.environment).isSameAs(service.cachedFor(workDir))
+        assertThat(restored.environment).isNotSameAs(original.environment)
+        finish(restored)
+    }
+
+    fun `test shared child export must not move project toolchain probe cwd`() = runBlocking<Unit> {
+        finish(startRootProbe())
+        val child = Files.createDirectories(workDir.resolve("submodule"))
+        Files.writeString(workDir.resolve("go.mod"), "module root\ngo 1.25.0\n")
+        Files.writeString(child.resolve("go.mod"), "module child\ngo 1.26.0\n")
+        // The CLI still resolves the root .envrc; only the export working directory changes.
+        service.load(child)
+        val replacement = nextProbe()
+        assertThat(replacement.environment).isSameAs(service.cachedFor(workDir))
+        assertThat(replacement.environment.workingDir).isEqualTo(child) // Preserve export provenance.
+        val commands = FakeDirenvProcessRunner()
+        val result = sync.probe(replacement.environment, workDir.resolve("go"),
+            listOf("env", "-json", "GOROOT", "GOPATH"), commands)
+        assertThat(result).isInstanceOf(ToolchainProbeResult.Success::class.java)
+        org.assertj.core.api.SoftAssertions.assertSoftly { checks ->
+            checks.assertThat(commands.invocations.single().workingDir).describedAs("project probe process cwd").isEqualTo(workDir)
+            checks.assertThat(commands.invocations.single().args[1]).describedAs("direnv exec directory").isEqualTo(workDir.toString())
+        }
+        finish(replacement)
+    }
+
+    fun `test project probe uses project directory when envrc is above the project`() = runBlocking<Unit> {
+        val rc = workDir.parent.resolve(".envrc").toString().replace("\\", "\\\\")
+        runner.respondTo("export", DirenvProcessResult(0, """{"DIRENV_FILE":"$rc"}""", ""))
+        val child = Files.createDirectories(workDir.resolve("nested-module"))
+        service.load(workDir)
+        finish(nextProbe())
+        service.load(child)
+        val replacement = nextProbe()
+        val commands = FakeDirenvProcessRunner()
+        assertThat(sync.probe(replacement.environment, workDir.resolve("go"), listOf("env"), commands))
+            .isInstanceOf(ToolchainProbeResult.Success::class.java)
+        assertThat(commands.invocations.single().workingDir).isEqualTo(workDir)
+        assertThat(commands.invocations.single().args[1]).isEqualTo(workDir.toString())
+        finish(replacement)
+        service.invalidate(null)
+        assertThat(sync.probe(replacement.environment, workDir.resolve("go"), listOf("env"), commands))
+            .isSameAs(ToolchainProbeResult.Stale)
+        assertThat(commands.invocations).hasSize(1)
     }
 
 }
