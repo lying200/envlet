@@ -51,3 +51,9 @@ independent blocked child does not interrupt SDK setup. See
 Cache commits and invalidation now share generation checks and one metadata lock;
 language consumers receive environment changes separately from display status.
 See [ENV-16 provenance and validation](validation-env16.md).
+
+## ENV-17 follow-up
+
+Go/Rust configuration decisions have focused tests, probe failures have safe
+structured diagnostics, and both adapters guard the actual SDK publication point.
+See [ENV-17 implementation and validation](validation-env17.md).

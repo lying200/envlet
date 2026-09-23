@@ -183,6 +183,23 @@ class EnvletToolchainSyncTest : DirenvLightTestCase() {
         assertThat(probes.tryReceive().isFailure).isTrue()
     }
 
+    fun `test publication guard prevents expired plans from writing SDK settings`() = runBlocking<Unit> {
+        val probe = startRootProbe()
+        var writes = 0
+        assertThat(sync.applyIfCurrent(probe.environment, { true }) { writes++ }).isTrue()
+        service.invalidate(null)
+        assertThat(sync.applyIfCurrent(probe.environment, { true }) { writes++ }).isFalse()
+        assertThat(writes).isEqualTo(1)
+        respondLoaded(workDir)
+        service.load(workDir)
+        val replacement = nextProbe()
+        assertThat(sync.applyIfCurrent(probe.environment, { true }) { writes++ }).isFalse()
+        assertThat(sync.applyIfCurrent(replacement.environment, { false }) { writes++ }).isFalse()
+        assertThat(sync.applyIfCurrent(replacement.environment, { true }) { writes++ }).isTrue()
+        assertThat(writes).isEqualTo(2)
+        finish(replacement)
+    }
+
     fun `test late subscriber synchronizes cached root despite a blocked child status`() = runBlocking<Unit> {
         val first = startRootProbe()
         finish(first)

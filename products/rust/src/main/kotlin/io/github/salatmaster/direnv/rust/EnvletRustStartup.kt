@@ -1,4 +1,4 @@
-// Modified for ENV-13: assemble project-owned SDKs from independently selected tools.
+// Modified for ENV-17: separate configuration decisions and guard SDK publication.
 package io.github.salatmaster.direnv.rust
 
 import com.intellij.execution.wsl.WslPath
@@ -11,6 +11,9 @@ import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.settings.DirenvSettings
 import io.github.salatmaster.direnv.toolchain.EnvletToolchainSync
 import io.github.salatmaster.direnv.toolchain.ToolchainCandidateResolver
+import io.github.salatmaster.direnv.toolchain.ToolchainLanguage
+import io.github.salatmaster.direnv.toolchain.ToolchainReason
+import io.github.salatmaster.direnv.toolchain.ToolchainStage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.rust.cargo.project.model.CargoProjectsService
@@ -22,57 +25,82 @@ class EnvletRustStartup : ProjectActivity {
     override suspend fun execute(project: Project) {
         val sync = project.service<EnvletToolchainSync>()
         val options = DirenvSettings.getInstance(project)
-        sync.watch({ options.state.autoRustToolchain }) { environment ->
+        sync.watch({ options.state.autoRustToolchain }, ToolchainLanguage.RUST) { environment ->
+            fun report(stage: ToolchainStage, reason: ToolchainReason) = sync.report(ToolchainLanguage.RUST, stage, reason)
             val machine = DirenvMachine.toolchainMachine(project)
             val rustcName = machine.executable("rustc")
             val cargoName = machine.executable("cargo")
             val rustc = ToolchainCandidateResolver.resolveExecutable(environment.entries, rustcName, machine)
-                ?: return@watch
+                ?: run {
+                    report(ToolchainStage.DISCOVERY, ToolchainReason.NOT_CONFIGURED)
+                    return@watch
+                }
             val cargo = ToolchainCandidateResolver.resolveExecutable(environment.entries, cargoName, machine)
-                ?: return@watch
+                ?: run {
+                    report(ToolchainStage.DISCOVERY, ToolchainReason.NOT_CONFIGURED)
+                    return@watch
+                }
             val root = DirenvMachine.projectDir(project) ?: return@watch
             val wsl = WslPath.parseWindowsUncPath(root.toString())
-            if (wsl == null && !DirenvMachine.isLocal(project)) return@watch
-            val sysroot = sync.probe(environment, rustc, listOf("--print", "sysroot"))?.trim()
-                ?.takeIf { it.isNotBlank() }?.let(machine::path) ?: return@watch
-            if (sync.probe(environment, cargo, listOf("--version")) == null) return@watch
-            val sources = sequenceOf(
-                environment.entries["RUST_SRC_PATH"]?.let(machine::path),
-                sysroot.resolve("lib/rustlib/src/rust/library"),
-            ).filterNotNull().firstOrNull { Files.isRegularFile(it.resolve("core/src/lib.rs")) }
+            if (wsl == null && !DirenvMachine.isLocal(project)) {
+                report(ToolchainStage.DISCOVERY, ToolchainReason.UNSUPPORTED_TARGET)
+                return@watch
+            }
+            val rawSysroot = sync.outputOrReport(ToolchainLanguage.RUST, ToolchainStage.RUST_SYSROOT,
+                sync.probe(environment, rustc, listOf("--print", "sysroot"))) ?: return@watch
+            if (rawSysroot.isBlank()) {
+                report(ToolchainStage.RUST_SYSROOT, ToolchainReason.INVALID_OUTPUT)
+                return@watch
+            }
+            val sysroot = machine.path(rawSysroot.trim())?.takeIf { it.isAbsolute } ?: run {
+                report(ToolchainStage.RUST_SYSROOT, ToolchainReason.PATH_MAPPING)
+                return@watch
+            }
+            if (sync.outputOrReport(ToolchainLanguage.RUST, ToolchainStage.CARGO_VERSION,
+                    sync.probe(environment, cargo, listOf("--version"))) == null) return@watch
+            val optional = RustToolchainPlan.OPTIONAL_TOOLS.mapNotNull { name ->
+                ToolchainCandidateResolver.resolveExecutable(environment.entries, machine.executable(name), machine)?.let { name to it }
+            }.toMap()
+            val plan = RustToolchainPlan.fromDiscovery(rustc, cargo,
+                environment.entries["RUST_SRC_PATH"]?.let(machine::path), sysroot, optional,
+            ) { Files.isRegularFile(it.resolve("core/src/lib.rs")) }
+            if (plan.sources == null) report(ToolchainStage.CONFIGURATION, ToolchainReason.MISSING_SOURCES)
             val bin = if (wsl != null || SystemInfo.isUnix) {
-                val tools = linkedMapOf("rustc" to rustc, "cargo" to cargo)
-                for (name in listOf("rustdoc", "rustfmt", "cargo-fmt", "clippy-driver", "cargo-clippy", "rust-gdb", "rust-lldb")) {
-                    ToolchainCandidateResolver.resolveExecutable(environment.entries, name, machine)?.let { tools[name] = it }
-                }
                 if (!sync.isCurrent(environment)) return@watch
-                ManagedRustToolchainHome.prepare(root, tools)
+                ManagedRustToolchainHome.prepare(root, plan.tools)
             } else {
                 // Preserve native Windows behavior without requiring symlink privileges.
                 machine.splitPath(environment.entries["PATH"] ?: return@watch)
                     .filter { it.isNotBlank() }.mapNotNull(machine::path).firstOrNull { candidate ->
                         Files.isRegularFile(candidate.resolve(rustcName)) && Files.isRegularFile(candidate.resolve(cargoName)) &&
                             Files.isSameFile(candidate.resolve(rustcName), rustc) && Files.isSameFile(candidate.resolve(cargoName), cargo)
-                    } ?: return@watch
+                    } ?: run {
+                        report(ToolchainStage.CONFIGURATION, ToolchainReason.INVALID_SDK)
+                        return@watch
+                    }
             }
             val toolchain = if (wsl != null) EnvletWslRustToolchain(WslPath.parseWindowsUncPath(bin.toString())!!)
                 else RsLocalToolchain(bin)
-            if (!toolchain.looksLikeValidToolchain()) return@watch
+            if (!toolchain.looksLikeValidToolchain()) {
+                report(ToolchainStage.CONFIGURATION, ToolchainReason.INVALID_SDK)
+                return@watch
+            }
 
             withContext(Dispatchers.EDT) {
-                if (!sync.isCurrent(environment) || !options.state.autoRustToolchain) return@withContext
-                project.service<EnvletRustToolchainBinding>().publish(bin, environment)
-                val settings = project.service<RustProjectSettingsService>()
-                val sourcePath = sources?.toString()?.replace('\\', '/')
-                if (settings.toolchain != toolchain || settings.explicitPathToStdlib != sourcePath) {
-                    settings.modify {
-                        it.toolchain = toolchain
-                        it.explicitPathToStdlib = sourcePath
+                sync.applyIfCurrent(environment, { options.state.autoRustToolchain }) {
+                    project.service<EnvletRustToolchainBinding>().publish(bin, environment)
+                    val settings = project.service<RustProjectSettingsService>()
+                    val sourcePath = plan.sources?.toString()?.replace('\\', '/')
+                    if (settings.toolchain != toolchain || settings.explicitPathToStdlib != sourcePath) {
+                        settings.modify {
+                            it.toolchain = toolchain
+                            it.explicitPathToStdlib = sourcePath
+                        }
+                        // modify emits the settings event which schedules Cargo refresh.
+                    } else {
+                        // Environment-only updates still affect Cargo metadata/build scripts.
+                        project.service<CargoProjectsService>().refreshAllProjects(false)
                     }
-                    // modify emits the settings event which schedules Cargo refresh.
-                } else {
-                    // Environment-only updates still affect Cargo metadata/build scripts.
-                    project.service<CargoProjectsService>().refreshAllProjects(false)
                 }
             }
         }

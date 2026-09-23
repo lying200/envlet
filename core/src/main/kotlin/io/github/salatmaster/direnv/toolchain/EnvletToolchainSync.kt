@@ -1,9 +1,11 @@
 // Modified for ENV-16: subscribe to committed environment changes, independently of UI status.
 package io.github.salatmaster.direnv.toolchain
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.progress.ProcessCanceledException
 import io.github.salatmaster.direnv.DirenvGuard
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
@@ -26,7 +28,7 @@ import java.nio.file.Path
 class EnvletToolchainSync(private val project: Project, private val scope: CoroutineScope) {
     private val log = Logger.getInstance(EnvletToolchainSync::class.java)
 
-    fun watch(enabled: () -> Boolean, synchronize: suspend (DirenvEnvironment) -> Unit) {
+    fun watch(enabled: () -> Boolean, language: ToolchainLanguage = ToolchainLanguage.UNSPECIFIED, synchronize: suspend (DirenvEnvironment) -> Unit) {
         var job: Job? = null
         var synchronizedEnvironment: DirenvEnvironment? = null
         val listener = object : DirenvEnvironmentListener {
@@ -52,9 +54,11 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
                         synchronize(environment)
                     } catch (e: CancellationException) {
                         throw e
+                    } catch (e: ProcessCanceledException) {
+                        throw e
                     } catch (_: Exception) {
                         // Process diagnostics may contain environment values; keep them out of logs.
-                        log.warn("Envlet could not synchronize a project toolchain; existing SDK settings were retained")
+                        if (isCurrent(environment)) report(language, ToolchainStage.SYNCHRONIZATION, ToolchainReason.UNEXPECTED)
                     }
                 }
             }
@@ -69,22 +73,38 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
         return DirenvService.getInstance(project).cachedFor(root) === environment
     }
 
+    /** Must be called at the actual SDK publication point, after background discovery. */
+    fun applyIfCurrent(environment: DirenvEnvironment, enabled: () -> Boolean, apply: () -> Unit): Boolean {
+        ApplicationManager.getApplication().assertIsDispatchThread()
+        if (!enabled() || !isCurrent(environment)) return false
+        apply()
+        return true
+    }
+
+    fun report(language: ToolchainLanguage, stage: ToolchainStage, reason: ToolchainReason, exitCode: Int? = null) {
+        val diagnostic = ToolchainDiagnostic(language, stage, reason, exitCode)
+        if (reason == ToolchainReason.NOT_CONFIGURED) log.debug("Envlet: $diagnostic")
+        else log.warn("Envlet: $diagnostic")
+    }
+
+    fun outputOrReport(language: ToolchainLanguage, stage: ToolchainStage, result: ToolchainProbeResult): String? =
+        when (result) {
+            is ToolchainProbeResult.Success -> result.output
+            ToolchainProbeResult.Stale -> null // Normal cancellation/reload; not a warning.
+            is ToolchainProbeResult.Failure -> {
+                report(language, stage, result.reason, result.exitCode)
+                null
+            }
+        }
+
     /** Run the selected tool inside direnv itself, including its unset-variable semantics. */
-    suspend fun probe(environment: DirenvEnvironment, executable: Path, arguments: List<String>): String? =
+    suspend fun probe(environment: DirenvEnvironment, executable: Path, arguments: List<String>): ToolchainProbeResult =
         withContext(Dispatchers.IO) {
-            if (!isCurrent(environment)) return@withContext null
             val settings = DirenvSettings.getInstance(project)
             val runner = if (DirenvMachine.isLocal(project)) GeneralCommandLineRunner() else EelDirenvProcessRunner(project)
-            val mapper = DirenvMachine.pathMapper(project)
-            val cwd = mapper.toDirenv(environment.workingDir) ?: return@withContext null
-            val tool = mapper.toDirenv(executable) ?: return@withContext null
-            val result = runner.run(
-                settings.state.executablePath,
-                listOf("exec", cwd, tool) + arguments,
-                environment.workingDir,
-                settings.state.extraEnv.toMap(),
-                settings.timeoutMs(),
-            )
-            if (result.exitCode == 0 && isCurrent(environment)) result.stdout else null
+            ToolchainProbe(runner, DirenvMachine.pathMapper(project)).run(
+                environment, executable, arguments, settings.state.executablePath,
+                settings.state.extraEnv.toMap(), settings.timeoutMs(),
+            ) { isCurrent(environment) }
         }
 }

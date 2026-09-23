@@ -86,6 +86,32 @@ try {
         }
         record('invalidation.reload-restores-rust-binding=true')
     }
+    if (Boolean.getBoolean('envlet.validation.testDiscoveryFailures')) {
+        def previousHome = go.getSdk(null).homeUrl
+        def previousRoots = libraries.libraryRootUrls.toSet()
+        def previousEnvironment = environment.cachedFor(root)
+        Files.writeString(root.resolve('.probe/go-invalid-output'), 'fixture\n')
+        Files.writeString(root.resolve('.probe/rust-missing-sources'), 'fixture\n')
+        environment.scheduleReload(root)
+        waitUntil('missing sources plan published with a valid compiler') {
+            def latest = environment.cachedFor(root)
+            latest != null && !latest.is(previousEnvironment) &&
+                rust.explicitPathToStdlib == null && binding.owns(rust.toolchain.location) &&
+                Files.exists(root.resolve('.probe/go-invalid-seen'))
+        }
+        assert rust.toolchain.looksLikeValidToolchain()
+        assert go.getSdk(null).homeUrl == previousHome
+        assert libraries.libraryRootUrls.toSet() == previousRoots
+        record('malformed-go-output.retains-sdk=true')
+        record('missing-rust-sources.retains-compiler=true')
+        Files.delete(root.resolve('.probe/go-invalid-output'))
+        Files.delete(root.resolve('.probe/rust-missing-sources'))
+        environment.scheduleReload(root)
+        waitUntil('sources restored') {
+            rust.explicitPathToStdlib != null && binding.owns(rust.toolchain.location)
+        }
+        record('discovery.restore=true')
+    }
     record('ACCEPTANCE=true')
     record('FINISHED')
 } catch (Throwable failure) {

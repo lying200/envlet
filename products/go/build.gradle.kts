@@ -7,7 +7,15 @@ plugins {
 
 kotlin { jvmToolchain(25) }
 
+testing {
+    suites {
+        named<JvmTestSuite>("test") { useJUnitJupiter(libs.versions.junitJupiter) }
+    }
+}
+
 dependencies {
+    testImplementation(libs.assertj)
+    testRuntimeOnly(libs.kotlinx.serialization.json)
     implementation(project(":core"))
     compileOnly(libs.kotlinx.serialization.json)
     intellijPlatform {

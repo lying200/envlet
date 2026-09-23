@@ -8,6 +8,12 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Improve ENV-17 diagnostics with language, stage, failure category and exit code,
+  keeping probe output and exception messages private. Separate Go/Rust planning
+  from guarded SDK publication; test malformed Go output, Rust source fallbacks,
+  missing optional tools and stale plans. Missing Rust sources retain a usable
+  compiler, with a diagnostic; an unmappable Go path rejects the whole plan.
+
 - Fix ENV-16: reject exports invalidated while in flight, including their aliases,
   retry records and watches. Centralize metadata commits behind a short lock; keep
   direnv/VFS IO outside it. Notify language integrations through a separate scoped,
