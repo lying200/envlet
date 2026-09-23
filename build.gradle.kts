@@ -17,7 +17,7 @@ val pluginVersion = providers.environmentVariable("PLUGIN_VERSION")
 
 version = pluginVersion.get()
 
-kotlin { jvmToolchain(21) }
+kotlin { jvmToolchain(25) }
 
 listOf(configurations.runtimeClasspath, configurations.testRuntimeClasspath).forEach { cfg ->
     cfg.configure {
@@ -30,7 +30,10 @@ listOf(configurations.runtimeClasspath, configurations.testRuntimeClasspath).for
 
 dependencies {
     intellijPlatform {
-        create(IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion")) {
+        // Modified for Envlet: IDEA 262 is unified and requires Java 25.
+        val localIde = providers.gradleProperty("localIdePath").orNull
+        if (localIde != null) local(localIde)
+        else create(IntelliJPlatformType.IntellijIdea, providers.gradleProperty("platformVersion")) {
             useInstaller = false
         }
         pluginComposedModule(implementation(project(":core")))
@@ -38,6 +41,8 @@ dependencies {
         pluginComposedModule(implementation(project(":products:gradle")))
         pluginComposedModule(implementation(project(":products:java")))
         pluginComposedModule(implementation(project(":products:javascript")))
+        pluginComposedModule(implementation(project(":products:go")))
+        pluginComposedModule(implementation(project(":products:rust")))
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
@@ -87,19 +92,12 @@ intellijPlatform {
 
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
-            // No upper bound: the plugin must not stop loading when a new IDE ships.
-            untilBuild.unset()
+            // Validate a new platform before widening the supported range.
+            untilBuild = "262.*"
         }
     }
     pluginVerification {
         ides {
-            // Community is the compile target and the lowest common denominator.
-            create(IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion"))
-            // PyCharm Community has no Java plugin, so this proves the optional product modules
-            // really are optional and the plugin loads in IDEs beyond IDEA.
-            create(IntelliJPlatformType.PyCharmCommunity, providers.gradleProperty("platformVersion"))
-            // Ultimate is the only IDE here that bundles JavaScript, so it is the only one that
-            // exercises the Node module rather than skipping it as unavailable.
             create(IntelliJPlatformType.IntellijIdea, providers.gradleProperty("platformVersion"))
         }
     }

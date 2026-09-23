@@ -1,195 +1,120 @@
-# direnv Everywhere
+# Envlet
 
-**direnv for JetBrains IDEs.**
+A small IntelliJ plugin for project environments from direnv and devenv.
 
-**Your `.envrc` environment, everywhere the IDE runs something.** Run configurations, the build
-process, Gradle, Maven, External Tools and the terminal — scoped to the project, reloaded
-automatically, and never leaking your secrets.
+Envlet is a personal fork of [direnv Everywhere](https://github.com/salatmaster/direnv-jetbrains-plugin)
+by salatmaster. It focuses on Windows IntelliJ IDEA with NixOS WSL. Go/Rust toolchain synchronization and fish compatibility have been exercised in
+the installed IDEA 2026.2.3 using an isolated profile. This is a development build
+for personal use; see [validation and limits](docs/validation.md).
 
-Implements [IJPL-11588](https://youtrack.jetbrains.com/issue/IJPL-11588), open since 2023 with 83
-votes. [direnv-vscode](https://github.com/direnv/direnv-vscode) served as the reference for
-direnv's behaviour.
+## Scope
 
----
+The inherited plugin loads approved `.envrc` environments for IDE processes,
+terminals and Gradle, and offers Java/Node toolchains. Envlet adds automatic
+Go/Rust setup for the owner's workflow. Progress and acceptance criteria are in
+[the implementation plan](docs/plan.md).
 
-## The problem
+Envlet requires a trusted IDE project and an approved `.envrc`. Review the file
+and run `direnv allow` yourself. Environment values are kept in memory; they are
+not copied into project settings. SDK and source paths necessarily belong to IDE
+configuration.
 
-You use [direnv](https://direnv.net). Your JDK comes from Nix, your toolchain from Devbox, your
-credentials from a `.env` file the shell loads for you. In the terminal, everything works.
+## Install and use
 
-Then you open the IDE, and none of it exists. So you either copy variables into every run
-configuration by hand and keep them in sync forever, or you launch the IDE from a shell where
-direnv has already run — and then you can only ever have **one** project open, because that
-environment is global to the process.
+Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
+Disable direnv Everywhere, install `envlet-0.1.8-dev.zip`, and restart IDEA.
+Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
+plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
-Both workarounds appear, almost word for word, in the comments on IJPL-11588.
+Open the project through its WSL path. Under **Settings → Tools → Envlet**,
+automatic Go/Rust management and terminal shell-hook mode default to enabled.
+Keep your existing fish `direnv hook` and turn on IDEA's **Terminal → Shell integration**.
+The terminal loads through its own hook, preserving devenv's startup output;
+IDE processes and SDK selection use Envlet's in-memory environment cache.
+Background process launches without IDE read/write locks resolve an uncached working
+directory before starting, including ordinary subdirectories after a reload. Calls
+on the UI thread or under IDE locks remain cache-only and schedule background warming;
+their first uncached call can still miss the environment. Failed directories retry
+on a later automatic attempt after 60 seconds; manual reload and watched file/approval
+changes bypass that delay. See [ENV-14](docs/validation-env14.md) for provenance and checks.
 
-## What this plugin does
+On a successful environment load, Envlet queries `go env` for GOROOT/GOPATH and
+selects the corresponding WSL SDK. For Rust on WSL or native Linux, it independently
+discovers rustc and cargo from PATH and creates a project-owned SDK under
+`.direnv/envlet/rust/<tool-mapping-hash>/bin`. This directory contains links to the
+selected executables, including available companion tools; no environment snapshots
+or launcher scripts are written. Standard library sources are configured separately.
+On Windows/WSL this SDK uses EEL so Cargo sync and native dependency builds receive
+the loaded compiler environment. See [ENV-13 validation](docs/validation-env13.md).
+Root environment changes repeat synchronization. Independent child-directory loading
+or failure does not cancel or repeat root Go/Rust setup. See [ENV-15 validation](docs/validation-env15.md).
+Environment invalidation also rejects exports already in flight; see
+[ENV-16 validation](docs/validation-env16.md). Toolchain failures log safe language,
+stage and reason fields. Invalid Go discovery retains the current SDK; Rust can
+configure a compiler without standard library sources, with a diagnostic. See
+[ENV-17 validation](docs/validation-env17.md) for toolchain checks. Shared-directory
+watch ownership and automatic approval revocation/recovery are covered by
+[ENV-18 validation](docs/validation-env18.md).
+Import Go/Cargo projects as usual.
+Turning off automatic management leaves the last SDK paths in place; you can then
+change them manually. Envlet does not create language run/debug configurations.
 
-| Where | Works |
-|---|---|
-| Run/Debug configurations — every language | yes |
-| Build process (compilation) | yes |
-| Gradle sync, Gradle tasks, Maven | yes |
-| Terminal | yes |
-| External Tools, File Watchers | yes |
-| Git hooks — `pre-commit` and the rest, when you commit from the IDE | yes |
-| Processes started by other plugins | yes |
-| Indexing and static analysis | partly — via SDK suggestion, see [Limitations](#limitations) |
+To roll back, disable or uninstall Envlet and restore any previous SDK selections.
+Its settings use `envlet.xml`; upstream settings remain separate.
+Generated SDKs require a writable project cache. Envlet writes an ignore file only
+inside `.direnv/envlet`, preserving the project's `.gitignore`. Tool changes create
+a new directory, retaining old SDK links for in-flight builds. After restoring SDK
+selections and closing the project, this Envlet cache can be removed independently
+of other `.direnv` contents.
 
-The environment is resolved per **project and working directory**, then injected as each process
-starts. Two projects open side by side keep separate environments. A nested `.envrc` in a
-subdirectory gets its own. The IDE's own process environment is never modified — that is what makes
-the isolation real rather than approximate.
+## direnv, devenv and host platforms
 
-## It keeps itself up to date
+Environment loading uses `direnv export json`; devenv is optional. An approved
+`.envrc` may use ordinary exports, nix-direnv or devenv. Go discovery queries the
+selected `go` executable and does not require a devenv profile.
 
-Change `flake.lock`, and the environment reloads. Not because the plugin knows anything about Nix,
-but because direnv reports every file the environment depends on and the plugin watches all of
-them — `.envrc`, `flake.nix`, `.env`, `devbox.json`, whatever your setup uses.
+Rust discovery no longer requires a common directory for rustc and cargo on WSL or
+native Linux. Each project's generated SDK has its own identity even when projects
+share Nix store packages. The provider claims only a successfully prepared SDK bound
+to that project's current loaded environment. Disabling management or revoking the
+environment ends that ownership; the last selected SDK path remains as described above.
 
-Run `direnv allow` in an ordinary terminal, and the IDE notices within seconds and loads the
-environment. No button, no restart.
-
-Detection combines file system events with a two-second poll of the watched files. The poll is not
-redundant: the IDE delivers no events at all for direnv's allow stamps under
-`~/.local/share/direnv`, so approval granted in a terminal would otherwise go unnoticed. direnv
-itself detects changes the same way, by comparing modification times.
-
-## Security is the default, not a setting
-
-An `.envrc` is arbitrary shell code, so:
-
-- **`direnv allow` is never invoked automatically** — under any setting, ever. Approval is always an
-  explicit action, and the UI offers *Open .envrc* before *Allow*, so reading comes first.
-- **Untrusted projects never run direnv at all.** Opening a repository does not execute its code.
-- **Variable values never leave memory.** Not into logs, not into run configurations, not into any
-  file under `.idea/`. The types that carry environment data refuse to render their own values, and
-  a test asserts it with a canary string.
-
-Want to see what was applied? The environment viewer lists variable **names** and whether each was
-added, changed or removed. Knowing that `PGPASSWORD` was set is the useful part; its value is not,
-and materialising it into a run configuration would put it straight into git.
-
-## How it compares
-
-Four other direnv plugins are published on the JetBrains Marketplace. The table is built from their
-own Marketplace descriptions and, where the source is public, from their code — checked in August
-2026 against the versions current then. A dash means the plugin does not offer or document the
-capability, not that it was tested and failed. Corrections are welcome as issues.
-
-| | direnv&nbsp;Everywhere | [better_direnv][cmp-bd] | [DirEnv&nbsp;Pro][cmp-pro] | [Direnv][cmp-d] | [Direnv&nbsp;Loader][cmp-dl] |
-|---|:--:|:--:|:--:|:--:|:--:|
-| Run/Debug configurations | every type | six languages ¹ | — | every type | every type |
-| Terminal | ✅ | — | — | — | — |
-| Build process, External Tools, other plugins' processes | ✅ | — | — | — | — |
-| Gradle sync, Gradle tasks, Maven | ✅ | — | — | run configs only | Gradle tasks |
-| A JDK or Node interpreter from direnv offered to the project | ✅ | — | — | — | — |
-| Projects side by side keep separate environments | ✅ | — | — | — | — |
-| An `.envrc` below the project root | ✅ | — | root only | by hand | — |
-| Reloads on `flake.lock`, `.env`, … (`DIRENV_WATCHES`) | ✅ | discarded ² | `.envrc` on save | — | — |
-| Notices `direnv allow` run in a terminal | ✅ | — | — | — | — |
-| `direnv allow` is never run for you | guaranteed | opt-in auto-allow | — | — | opt-in auto-allow |
-| Nothing executes in an untrusted project | ✅ | — | — | — | — |
-| Values stay out of run configs and `.idea/` | ✅ | ✅ | — | written in ³ | ✅ |
-| Nothing to switch on per run configuration | ✅ | a checkbox each | load by hand | ✅ | a checkbox each |
-
-¹ Java, Go, Node.js, Python, PHP and Ruby. Its description notes that "each run configuration type
-needs to be added manually", and the source carries one extension class per product — that is the
-cost this plugin avoids by hooking the platform below the run configuration instead of above it.
-² It deletes `DIRENV_WATCHES` from the exported environment, so nothing outside `.envrc` — a
-`flake.lock`, a `.env`, an allow stamp — can trigger a reload.
-³ By design: values are merged into the Environment Variables field of every run configuration,
-where they are visible and editable — and saved with the configuration.
-
-**What they do that this plugin does not.** better_direnv has been maintained far longer than this
-one.
-
-[cmp-bd]: https://plugins.jetbrains.com/plugin/19275-better-direnv
-[cmp-pro]: https://plugins.jetbrains.com/plugin/28160-direnv-pro
-[cmp-d]: https://plugins.jetbrains.com/plugin/30539-direnv
-[cmp-dl]: https://plugins.jetbrains.com/plugin/30187-direnv-loader
-
-## Requirements
-
-- A JetBrains IDE, build **261 (2026.1)** or newer — IDEA, PyCharm, GoLand, WebStorm, CLion,
-  RubyMine, PhpStorm, RustRover. Verified against IDEA Community, IDEA Ultimate and PyCharm
-  Community.
-- [`direnv`](https://direnv.net/docs/installation.html) installed and available on `PATH`.
-
-The 2026.1 floor is a hard requirement rather than a preference: it is the first release whose
-terminal extension point works correctly across EEL boundaries, and without it the terminal cannot
-be supported properly.
-
-## Limitations
-
-Stated plainly, because a plugin that hides these costs you an afternoon:
-
-- **Most injection reads a cache rather than waiting for direnv.** A process started before the
-  first load finishes — or in a project you have not trusted, or whose `.envrc` is still blocked —
-  starts without the environment, silently. Opening the project triggers the load, so in practice
-  the cache is warm long before you run anything. The terminal and Gradle are the exceptions: both
-  are reached on a background thread, so they wait for direnv rather than starting without it.
-- **Git hooks run only if the IDE is told to run them.** The commit options carry a *Run Git hooks*
-  checkbox; with it off no hook runs at all, and no environment can reach one. That is the IDE's
-  setting rather than this plugin's, but it is the first thing to check when a hook does not see
-  what you expect.
-- **Indexing and static analysis do not follow `PATH`.** The IDE resolves toolchains through its
-  own settings, so a JDK or a Node interpreter provided by direnv is *offered* rather than adopted
-  silently.
-  That is deliberate: a Nix store path can vanish after garbage collection, and rewriting your
-  project SDK at that moment would break the project with no explanation.
-- **Non-local run targets** (Docker, SSH, remote interpreters) bypass the mechanism the plugin
-  hooks into.
-- **Variables direnv *unsets* are not removed from Gradle builds.** Gradle receives its
-  environment through a settings API that can only add variables on top of the IDE's own, so an
-  unset is a no-op on that one path. Everywhere else — run configurations, the terminal, the build
-  process — unsets are honoured. A warm Gradle daemon is not a problem: the environment is handed
-  to it explicitly with every build, so it cannot go stale between builds.
-- **WSL works; other remote machines are untested.** direnv runs on the machine the project lives
-  on, and a user has confirmed that on WSL with NixOS. SSH and container-backed projects take the
-  same code path, but nobody has run one yet.
-- Toolchain suggestions cover Java and Node.js. Go and Python reuse the same tested resolver and
-  need only their product module, plus an IDE that bundles the language to compile it against.
-
-## When the environment does not arrive
-
-A process starting without the direnv environment looks exactly like a process starting with it, so
-the plugin explains itself rather than leaving you to guess. Turn its logging on in **Help →
-Diagnostic Tools → Debug Log Settings** by adding
-
-```
-io.github.salatmaster.direnv
-```
-
-then reproduce the problem and open **Help → Show Log in Finder**. Every process the IDE starts
-leaves one line: either how many variables were injected, or why none were.
-
-| The log says | What it means |
+| Host / environment | Current scope |
 | --- | --- |
-| `no environment is loaded for it` | direnv has not run for that directory. Check the status bar; if it shows nothing, the project may have opened before direnv finished. |
-| `no open project contains it` | the working directory lies outside every content root of every open project. The plugin will not guess which project's environment to use, because guessing wrong leaks one project's secrets into another. |
-| `direnv is off or the project is untrusted` | either the plugin is disabled under Tools → direnv, or the project has not been trusted — an `.envrc` is arbitrary shell code, so untrusted projects never run one. |
-| `the command line has no working directory` | the process was started without one, so there is nothing to resolve an environment against. Harmless once per Gradle execution: the IDE computes Gradle's environment through a throwaway command line, and Gradle has an injection point of its own. |
+| Windows IDEA + WSL + devenv | Real SDK, Cargo native build, PATH and classic terminal checks |
+| Windows IDEA + WSL + plain direnv | Split and common tool layouts both pass automatic Rust SDK selection, Cargo sync and bundled SQLite builds; project isolation and revocation/restore verified. Go discovery is generic |
+| Native Linux IDEA + direnv, with or without devenv | Implemented local environment/Go/Rust paths; Rust uses `RsLocalToolchain` and does not need the WSL workaround. Full NixOS desktop IDE validation remains outstanding |
 
-Those lines are the useful part of a bug report. They name no variables and no values: direnv output
-is routinely secret, and even a name can disclose which service a project talks to.
+The former `.devenv/profile/bin` restriction was removed in 0.1.3-dev. Native Linux still requires a working
+IDE installation, a discoverable direnv executable (or its configured absolute path),
+and the appropriate JetBrains language plugins.
 
-## Building
+## Development
 
-```bash
-./gradlew buildPlugin   # plugin ZIP in build/distributions/
-./gradlew test          # direnv is NOT required to run the tests
-./gradlew runIde        # sandbox IDE with the plugin installed
+Use JDK 25 for IDEA 2026.2.3:
+
+```sh
+./gradlew test
+./gradlew buildPlugin
 ```
 
-The build provisions its own JDK 21, so a clean checkout builds without installing anything first.
+To compile against an existing IDE installation, pass
+`-PlocalIdePath=/absolute/path/to/idea`. Running platform tests also requires an
+installation for the host operating system. ZIP artifacts are in
+`build/distributions/`.
 
-## Contributing
+The fork has its own plugin ID (`io.github.lying200.envlet`) and settings file
+(`envlet.xml`). Disable direnv Everywhere before testing Envlet, so both plugins
+do not inject environments into the same processes.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the module layout, how to add support for another IDE,
-and the rules a change must not break. Release notes are in [CHANGELOG.md](CHANGELOG.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for implementation conventions and
+[API evidence](docs/research/language-apis.md) for the current Go/Rust integration
+constraints. Compatibility is bounded to IDEA build 262 pending verification of
+later builds. No Marketplace publication is configured for this development work.
 
-## License
+## License and origin
 
-[Apache-2.0](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+This README and the Envlet implementation are modified from the upstream project;
+the fork baseline is recorded in NOTICE. Kotlin package names are retained to
+keep the fork small and upstream changes easier to inspect.

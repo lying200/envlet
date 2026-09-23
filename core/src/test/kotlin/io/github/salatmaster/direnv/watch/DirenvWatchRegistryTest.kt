@@ -18,7 +18,7 @@ class DirenvWatchRegistryTest {
         val registry = DirenvWatchRegistry()
         registry.replace(Paths.get("/p"), listOf(watch("/p/.envrc")))
 
-        assertThat(registry.reloadTargetFor(Paths.get("/p/.envrc"))).isNotNull()
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/.envrc"))).isNotEmpty()
     }
 
     @Test
@@ -26,7 +26,7 @@ class DirenvWatchRegistryTest {
         val registry = DirenvWatchRegistry()
         registry.replace(Paths.get("/p"), listOf(watch("/p/flake.lock")))
 
-        assertThat(registry.reloadTargetFor(Paths.get("/p/flake.lock"))).isEqualTo(abs("/p"))
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/flake.lock"))).containsExactly(abs("/p"))
     }
 
     @Test
@@ -34,7 +34,7 @@ class DirenvWatchRegistryTest {
         val registry = DirenvWatchRegistry()
         registry.replace(Paths.get("/p"), listOf(watch("/p/.envrc")))
 
-        assertThat(registry.reloadTargetFor(Paths.get("/p/src/Main.kt"))).isEqualTo(null)
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/src/Main.kt"))).isEmpty()
     }
 
     @Test
@@ -45,7 +45,7 @@ class DirenvWatchRegistryTest {
         val stamp = "/home/u/.local/share/direnv/allow/8be319f2"
         registry.replace(Paths.get("/p"), listOf(watch(stamp)))
 
-        assertThat(registry.reloadTargetFor(Paths.get(stamp))).isEqualTo(abs("/p"))
+        assertThat(registry.reloadTargetsFor(Paths.get(stamp))).containsExactly(abs("/p"))
     }
 
     @Test
@@ -55,8 +55,8 @@ class DirenvWatchRegistryTest {
 
         registry.replace(Paths.get("/p"), listOf(watch("/p/new.txt")))
 
-        assertThat(registry.reloadTargetFor(Paths.get("/p/old.txt"))).isEqualTo(null)
-        assertThat(registry.reloadTargetFor(Paths.get("/p/new.txt"))).isEqualTo(abs("/p"))
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/old.txt"))).isEmpty()
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/new.txt"))).containsExactly(abs("/p"))
     }
 
     @Test
@@ -65,8 +65,8 @@ class DirenvWatchRegistryTest {
         registry.replace(Paths.get("/p"), listOf(watch("/p/.envrc")))
         registry.replace(Paths.get("/p/nested"), listOf(watch("/p/nested/.envrc")))
 
-        assertThat(registry.reloadTargetFor(Paths.get("/p/.envrc"))).isEqualTo(abs("/p"))
-        assertThat(registry.reloadTargetFor(Paths.get("/p/nested/.envrc"))).isEqualTo(abs("/p/nested"))
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/.envrc"))).containsExactly(abs("/p"))
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/nested/.envrc"))).containsExactly(abs("/p/nested"))
     }
 
     @Test
@@ -85,7 +85,7 @@ class DirenvWatchRegistryTest {
         registry.clear()
 
         assertThat(registry.allWatchedPaths()).isEmpty()
-        assertThat(registry.reloadTargetFor(Paths.get("/p/.envrc"))).isEqualTo(null)
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/.envrc"))).isEmpty()
     }
 
     @Test
@@ -93,7 +93,7 @@ class DirenvWatchRegistryTest {
         val registry = DirenvWatchRegistry()
         registry.replace(Paths.get("/p"), listOf(watch("/p/sub/../.envrc")))
 
-        assertThat(registry.reloadTargetFor(Paths.get("/p/.envrc"))).isEqualTo(abs("/p"))
+        assertThat(registry.reloadTargetsFor(Paths.get("/p/.envrc"))).containsExactly(abs("/p"))
     }
 
     @Test
@@ -143,7 +143,28 @@ class DirenvWatchRegistryTest {
     }
 
     @Test
+    fun `shared dependency returns every target independently of insertion order`() {
+        val first = abs("/p/one")
+        val second = abs("/p/two")
+        val shared = Files.createTempFile("shared-input", ".lock")
+        try {
+            for (order in listOf(listOf(first, second), listOf(second, first))) {
+                val registry = DirenvWatchRegistry()
+                for (target in order) registry.replace(target, listOf(DirenvWatch(shared, 0L, false)))
+                assertThat(registry.reloadTargetsFor(shared)).containsExactlyInAnyOrder(first, second)
+                assertThat(registry.staleTargets()).containsExactlyInAnyOrder(first, second)
+                registry.replace(first, emptyList())
+                assertThat(registry.reloadTargetsFor(shared)).containsExactly(second)
+                registry.rebaseline()
+                assertThat(registry.staleTargets()).isEmpty()
+            }
+        } finally {
+            Files.deleteIfExists(shared)
+        }
+    }
+
+    @Test
     fun `an unknown file yields no reload target when nothing is registered`() {
-        assertThat(DirenvWatchRegistry().reloadTargetFor(Paths.get("/p/.envrc"))).isNull()
+        assertThat(DirenvWatchRegistry().reloadTargetsFor(Paths.get("/p/.envrc"))).isEmpty()
     }
 }

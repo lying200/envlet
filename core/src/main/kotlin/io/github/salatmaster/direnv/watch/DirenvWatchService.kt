@@ -1,3 +1,4 @@
+// Modified for ENV-19: both watch paths delegate scope invalidation and consumer resolution to the service.
 package io.github.salatmaster.direnv.watch
 
 import com.intellij.openapi.Disposable
@@ -7,12 +8,14 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import io.github.salatmaster.direnv.DirenvService
-import io.github.salatmaster.direnv.direnv.DirenvWatch
+import io.github.salatmaster.direnv.DirenvCache
 import io.github.salatmaster.direnv.settings.DirenvSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.nio.file.Path
 
 /**
@@ -33,18 +36,28 @@ class DirenvWatchService(
 ) : Disposable {
 
     private val log = Logger.getInstance(DirenvWatchService::class.java)
-    private val registry = DirenvWatchRegistry()
+    @Volatile private var registry = DirenvWatchRegistry()
+    private val refreshMutex = Mutex()
+    private var watchRevision = -1L
 
     private var watchRequests: Collection<LocalFileSystem.WatchRequest> = emptyList()
     private var debounceJob: Job? = null
     private var pollJob: Job? = null
 
-    /** Records the files [loadedFor]'s environment depends on and registers them with the VFS. */
-    fun updateWatches(loadedFor: Path, watches: List<DirenvWatch>) {
-        registry.replace(loadedFor, watches)
-        registerFilesystemRoots()
-        startPollingIfNeeded()
-        log.debug("Watching ${registry.allWatchedPaths().size} paths for $loadedFor")
+    /** Reconcile physical watches from current committed metadata, never from an export result.
+     * The mutex only serializes background VFS work; invalidation does not wait for it.
+     */
+    internal suspend fun refreshWatches() = refreshMutex.withLock {
+        val service = DirenvService.getInstance(project)
+        while (!project.isDisposed) {
+            val snapshot = service.watchSnapshot()
+            if (snapshot.revision == watchRevision) break
+            val replacement = registryFor(snapshot)
+            registry = replacement
+            watchRevision = snapshot.revision
+            registerFilesystemRoots()
+            if (snapshot.entries.isNotEmpty()) startPollingIfNeeded()
+        }
     }
 
     /**
@@ -63,16 +76,20 @@ class DirenvWatchService(
                 delay(POLL_INTERVAL_MS)
                 if (!DirenvSettings.getInstance(project).state.watchFiles) continue
 
-                val stale = registry.staleTargets()
+                refreshWatches()
+                val baseline = registry
+                val observedRevision = watchRevision
+                val stale = baseline.staleTargets()
                 if (stale.isEmpty()) continue
 
                 // Rebaseline first: reloading replaces the watch set anyway, and this stops one
                 // change from being reported repeatedly if the reload fails.
-                registry.rebaseline()
+                baseline.rebaseline()
                 val service = DirenvService.getInstance(project)
+                if (service.watchSnapshot().revision != observedRevision) continue
                 for (target in stale) {
                     log.info("Reloading direnv environment for $target after a watched file changed")
-                    service.load(target, force = true)
+                    service.refreshScope(target)
                 }
             }
         }
@@ -85,7 +102,9 @@ class DirenvWatchService(
     fun handleChangedPaths(changed: Collection<Path>) {
         if (!DirenvSettings.getInstance(project).state.watchFiles) return
 
-        val targets = changed.mapNotNullTo(mutableSetOf()) { registry.reloadTargetFor(it) }
+        // Match against authoritative metadata even while background VFS reconciliation lags.
+        val current = registryFor(DirenvService.getInstance(project).watchSnapshot())
+        val targets = changed.flatMapTo(mutableSetOf()) { current.reloadTargetsFor(it) }
         if (targets.isEmpty()) {
             if (log.isDebugEnabled) {
                 log.debug(
@@ -100,7 +119,19 @@ class DirenvWatchService(
     }
 
     /** Exposed for tests and for the reload action. */
-    fun watchedPaths(): Set<Path> = registry.allWatchedPaths()
+    fun watchedPaths(): Set<Path> = DirenvService.getInstance(project).watchSnapshot().entries.values
+        .flatMap { it.files }.mapTo(mutableSetOf()) { it.path.toAbsolutePath().normalize() }
+
+    private fun registryFor(snapshot: DirenvCache.Watches): DirenvWatchRegistry {
+        val registry = DirenvWatchRegistry()
+        snapshot.entries.values.groupBy { it.scope }.forEach { (scope, records) ->
+            // Preserve intermediate-directory watches while their aliases are valid. For a
+            // shared file, use its latest committed baseline, regardless of map iteration order.
+            val files = records.sortedBy { it.revision }.flatMap { it.files }.associateBy { it.path }.values
+            registry.replace(scope, files.toList())
+        }
+        return registry
+    }
 
     private fun scheduleReload(targets: Set<Path>) {
         // Editors and build tools rewrite files in bursts; without debouncing, saving a flake.lock
@@ -111,7 +142,7 @@ class DirenvWatchService(
             val service = DirenvService.getInstance(project)
             for (target in targets) {
                 log.info("Reloading direnv environment for $target after a watched file changed")
-                service.load(target, force = true)
+                service.refreshScope(target)
             }
         }
     }
@@ -150,7 +181,8 @@ class DirenvWatchService(
             LocalFileSystem.getInstance().removeWatchedRoots(watchRequests)
             watchRequests = emptyList()
         }
-        registry.clear()
+        registry = DirenvWatchRegistry()
+        watchRevision = -1L
     }
 
     companion object {

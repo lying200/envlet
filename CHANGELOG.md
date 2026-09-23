@@ -6,6 +6,70 @@ All notable changes to this plugin are documented here. The format follows
 
 ## [Unreleased]
 
+### Envlet fork
+
+- Fix ENV-22: scope recovery clears cooldowns for failed directories whose scope
+  is retained only in watch metadata. A child can prepare its environment immediately
+  after root approval is restored; independent scopes retain their retry limits.
+
+- Fix ENV-20: a first-time child discovering Blocked/Denied now invalidates the
+  resolved scope and its aliases before publishing recovery watches and state.
+  Root process injection and stale SDK publication stop immediately, while later
+  approval can restore the environment through the watcher.
+- Fix ENV-21: project Go/Rust probes explicitly use the IDEA project directory
+  for both execution and `direnv exec`, independent of the last export directory.
+  A shared child module can no longer redirect project-level toolchain selection.
+
+- Fix ENV-19, introduced in ENV-18: invalidate watched environments by scope but
+  resolve them from an actual consumer directory. Projects using an ancestor
+  `.envrc` recover their cache mapping and Go/Rust synchronization after automatic
+  refresh; shared child aliases still require their own successful resolution.
+
+- Fix ENV-18, introduced in ENV-16: bind watches to explicit environment scopes,
+  replace orphan shared-directory records after scope reloads, and reload every
+  scope depending on a shared file. Approval revocation can no longer refresh an
+  orphan child while leaving the root's old environment cached.
+
+- Improve ENV-17 diagnostics with language, stage, failure category and exit code,
+  keeping probe output and exception messages private. Separate Go/Rust planning
+  from guarded SDK publication; test malformed Go output, Rust source fallbacks,
+  missing optional tools and stale plans. Missing Rust sources retain a usable
+  compiler, with a diagnostic; an unmappable Go path rejects the whole plan.
+
+- Fix ENV-16: reject exports invalidated while in flight, including their aliases,
+  retry records and watches. Centralize metadata commits behind a short lock; keep
+  direnv/VFS IO outside it. Notify language integrations through a separate scoped,
+  revisioned environment topic while UI continues to display the latest load state.
+
+- Fix ENV-15: base Go/Rust synchronization on the current root environment rather
+  than the last project-wide load status. Independent child loads no longer cancel
+  active probes or repeat completed SDK writes; root invalidation/replacement and
+  disabling management still cancel stale work. Bind listeners to their service scope.
+
+- Fix ENV-14 regressions introduced by Envlet's scope-cache changes: prepare unknown
+  directories before background process launch when no IDE lock is held, and bound
+  automatic retries per directory rather than gating on the last global load result.
+  Preserve upstream's cache-only UI/locked boundary and propagate launch cancellation.
+
+- Fix ENV-13: discover Rust tools independently and assemble project-owned SDK
+  directories from executable links, removing the devenv-profile requirement for
+  WSL builds. Bind providers only to current loaded environments; verify split/common
+  tool layouts, project isolation, revocation/restore and existing devenv behavior.
+
+- Independent Envlet identity, settings and Apache-2.0 upstream attribution.
+- Target IDEA 2026.2.3 / build 262 with Java 25 and optional Go/Rust adapters.
+- Synchronize Go SDK/GOPATH and Rust WSL toolchain/standard library sources from direnv.
+- Preserve native terminal direnv hooks and patch the known IDEA fish variable-scope collision.
+- Drop invalid cached environments and resolve nested `.envrc` scopes independently.
+- Add fish and cache regressions plus actual Windows IDEA / NixOS WSL validation records.
+- Fix ENV-11: use EEL for managed WSL devenv Rust profiles so Cargo sync and native
+  builds inherit the compiler environment; select the Linux build-script helper and
+  preserve custom Rust wrappers. Add a real IDEA/Cargo SQLite regression script.
+- Complete ENV-11 PATH handling: prepend the POSIX toolchain directory to explicit
+  PATH overrides without importing the Windows parent environment; preserve EEL
+  target inheritance when PATH is absent, including disabled inheritance. Cover
+  empty/space-containing PATH, repeated patching and actual uncached WSL processes.
+
 ## [0.2.4] - 2026-09-04
 
 ### Added

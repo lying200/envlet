@@ -7,9 +7,9 @@ import io.github.salatmaster.direnv.settings.DirenvSettings
 /**
  * Warms the environment cache when a project opens.
  *
- * The command line customizer serves cache only and never loads on demand, because it runs
- * synchronously at process start and may be on the EDT. Without this warm-up, the first process
- * a user launches after opening a project would run without the direnv environment.
+ * The command line customizer can wait only on background threads without IDE locks.
+ * Startup warming avoids that wait and makes the root environment available to cache-only
+ * callers on the EDT or under a read/write lock.
  */
 class DirenvStartupActivity : ProjectActivity {
 

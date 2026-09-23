@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.kotlin)
 }
 
-kotlin { jvmToolchain(21) }
+kotlin { jvmToolchain(25) }
 
 testing {
     suites {
@@ -26,7 +26,10 @@ dependencies {
     testRuntimeOnly(libs.junit.vintage.engine)
 
     intellijPlatform {
-        create(IntelliJPlatformType.IntellijIdeaCommunity, providers.gradleProperty("platformVersion")) {
+        // Modified for Envlet: IDEA 262 is unified and requires Java 25.
+        val localIde = providers.gradleProperty("localIdePath").orNull
+        if (localIde != null) local(localIde)
+        else create(IntelliJPlatformType.IntellijIdea, providers.gradleProperty("platformVersion")) {
             useInstaller = false
         }
         bundledPlugin("org.jetbrains.plugins.terminal")

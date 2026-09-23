@@ -1,3 +1,4 @@
+// Modified for ENV-16: suggestions follow environment changes independently of UI state.
 package io.github.salatmaster.direnv.javascript
 
 import com.intellij.execution.wsl.WslPath
@@ -13,8 +14,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
-import io.github.salatmaster.direnv.DirenvState
-import io.github.salatmaster.direnv.DirenvStateListener
+import io.github.salatmaster.direnv.DirenvEnvironmentChange
+import io.github.salatmaster.direnv.DirenvEnvironmentListener
 import io.github.salatmaster.direnv.toolchain.ToolchainCandidateResolver
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,13 +37,11 @@ class DirenvNodeSuggester : ProjectActivity {
 
     override suspend fun execute(project: Project) {
         project.messageBus.connect().subscribe(
-            DirenvStateListener.TOPIC,
-            object : DirenvStateListener {
+            DirenvEnvironmentListener.TOPIC,
+            object : DirenvEnvironmentListener {
                 private var lastSuggested: String? = null
 
-                override fun stateChanged(state: DirenvState) {
-                    if (state !is DirenvState.Loaded) return
-
+                override fun environmentChanged(change: DirenvEnvironmentChange) {
                     val workingDir = DirenvMachine.projectDir(project) ?: return
                     // A Nix shell routinely provides node for tooling alone, so without this every
                     // Java project whose .envrc happens to pull in nodejs would be offered an
@@ -105,7 +104,7 @@ class DirenvNodeSuggester : ProjectActivity {
 
     private fun suggest(project: Project, interpreter: NodeJsInterpreter, description: String) {
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("direnv")
+            .getNotificationGroup("envlet")
             .createNotification(
                 "direnv provides Node at $description, which differs from this project's interpreter.",
                 NotificationType.INFORMATION,

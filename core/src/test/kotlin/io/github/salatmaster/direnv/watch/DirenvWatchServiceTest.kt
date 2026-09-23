@@ -2,6 +2,7 @@ package io.github.salatmaster.direnv.watch
 
 import io.github.salatmaster.direnv.DirenvLightTestCase
 import io.github.salatmaster.direnv.DirenvService
+import io.github.salatmaster.direnv.DirenvState
 import io.github.salatmaster.direnv.direnv.DirenvCli
 import io.github.salatmaster.direnv.direnv.DirenvProcessResult
 import io.github.salatmaster.direnv.direnv.DirenvWatch
@@ -10,6 +11,7 @@ import io.github.salatmaster.direnv.direnv.FakeDirenvProcessRunner
 import io.github.salatmaster.direnv.settings.DirenvSettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 import java.nio.file.Paths
 import org.assertj.core.api.Assertions.assertThat
@@ -31,6 +33,86 @@ class DirenvWatchServiceTest : DirenvLightTestCase() {
             extraEnvProvider = { emptyMap() },
             timeoutMsProvider = { 5_000 },
         )
+    }
+
+    fun `test root reload then shared approval revocation removes root cache`() = sharedRevocation(false)
+    fun `test polling after root reload removes revoked root cache`() = sharedRevocation(true)
+
+    private fun sharedRevocation(poll: Boolean) = runBlocking<Unit> {
+        DirenvSettings.getInstance(project).state.watchFiles = false
+        val rc = Files.writeString(workDir.resolve(".envrc"), "export ENV18_CANARY=fixture")
+        val child = Files.createDirectories(workDir.resolve("shared"))
+        val exported = exportWith(rc.toString()).dropLast(1) +
+            ",\"DIRENV_FILE\":\"" + rc.toString().replace("\\", "\\\\") + "\"}"
+        runner.respondTo("export", DirenvProcessResult(0, exported, ""))
+        service.load(workDir)
+        service.load(child)
+        service.load(workDir, force = true)
+        assertThat(service.cachedFor(child)).isNull() // The child alias was invalidated.
+        assertThat(service.cachedFor(workDir)).isNotNull()
+
+        runner.respondTo("export", DirenvProcessResult(1, "", "direnv: error $rc is blocked."))
+        DirenvSettings.getInstance(project).state.watchFiles = true
+        if (poll) {
+            val changed = Files.getLastModifiedTime(rc).toMillis() + 60_000
+            Files.setLastModifiedTime(rc, java.nio.file.attribute.FileTime.fromMillis(changed))
+        } else watchService.handleChangedPaths(listOf(rc))
+        withTimeout(7_000) {
+            while (service.state() !is DirenvState.Blocked) delay(10)
+        }
+        assertThat(service.cachedFor(workDir))
+            .withFailMessage("Shared watch reloaded an orphan child while the revoked root remained cached")
+            .isNull()
+    }
+
+    fun `test all verified children keep intermediate envrc watches until scope reload`() = runBlocking<Unit> {
+        DirenvSettings.getInstance(project).state.watchFiles = false
+        val rootRc = Files.writeString(workDir.resolve(".envrc"), "export ENV18_CANARY=root")
+        val first = Files.createDirectories(workDir.resolve("first"))
+        val second = Files.createDirectories(workDir.resolve("second"))
+        fun export(rc: java.nio.file.Path) = exportWith(rc.toString()).dropLast(1) +
+            ",\"DIRENV_FILE\":\"" + rc.toString().replace("\\", "\\\\") + "\"}"
+        runner.respondTo("export", DirenvProcessResult(0, export(rootRc), ""))
+        service.load(workDir)
+        service.load(first)
+        service.load(second)
+        val previous = service.cachedFor(workDir)
+        assertThat(service.cachedFor(first)).isNotNull()
+        assertThat(watchService.watchedPaths()).contains(first.resolve(".envrc"), second.resolve(".envrc"))
+        val nestedRc = Files.writeString(first.resolve(".envrc"), "export ENV18_CANARY=nested")
+        DirenvSettings.getInstance(project).state.watchFiles = true
+        watchService.handleChangedPaths(listOf(nestedRc))
+        withTimeout(7_000) {
+            while (service.cachedFor(workDir) == null || service.cachedFor(workDir) === previous) delay(10)
+        }
+        assertThat(service.cachedFor(first)).isNull()
+        assertThat(service.cachedFor(second)).isNull()
+        runner.respondTo("export", DirenvProcessResult(0, export(nestedRc), ""))
+        assertThat(service.environmentForProcess(first)?.loadedRcPath).isEqualTo(nestedRc)
+    }
+
+    fun `test new nested blocked envrc owns its watches instead of former parent scope`() = nestedApprovalScope(false)
+    fun `test new nested denied envrc owns its watches instead of former parent scope`() = nestedApprovalScope(true)
+
+    private fun nestedApprovalScope(denied: Boolean) = runBlocking<Unit> {
+        DirenvSettings.getInstance(project).state.watchFiles = false
+        val rootRc = Files.writeString(workDir.resolve(".envrc"), "export ENV18_CANARY=root")
+        val child = Files.createDirectories(workDir.resolve("becomes-independent"))
+        fun export(rc: java.nio.file.Path, watched: java.nio.file.Path) = exportWith(watched.toString()).dropLast(1) +
+            ",\"DIRENV_FILE\":\"" + rc.toString().replace("\\", "\\\\") + "\"}"
+        runner.respondTo("export", DirenvProcessResult(0, export(rootRc, rootRc), ""))
+        service.load(workDir)
+        service.load(child)
+        val childRc = Files.writeString(child.resolve(".envrc"), "export ENV18_CANARY=child")
+        if (denied) {
+            val stamp = Files.writeString(Files.createDirectories(workDir.resolve("direnv/deny")).resolve("fixture-stamp"), "")
+            runner.respondTo("export", DirenvProcessResult(0, export(childRc, stamp), ""))
+        } else runner.respondTo("export", DirenvProcessResult(1, exportWith(childRc.toString()), "direnv: error $childRc is blocked."))
+        service.load(child, force = true)
+        assertThat(service.state().needsApproval).isTrue()
+        assertThat(service.watchSnapshot().entries[child]?.scope).isEqualTo(child)
+        assertThat(service.cachedFor(child)).isNull()
+        assertThat(service.cachedFor(workDir)).isNull()
     }
 
     /**

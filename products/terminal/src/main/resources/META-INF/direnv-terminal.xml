@@ -1,5 +1,7 @@
 <idea-plugin require-restart="false">
     <extensions defaultExtensionNs="org.jetbrains.plugins.terminal">
+        <!-- Modified for Envlet: isolate the public legacy fish command customization seam. -->
+        <localTerminalCustomizer implementation="io.github.salatmaster.direnv.terminal.EnvletFishCompatibility"/>
         <shellExecOptionsCustomizer
             implementation="io.github.salatmaster.direnv.terminal.DirenvShellExecOptionsCustomizer"/>
     </extensions>

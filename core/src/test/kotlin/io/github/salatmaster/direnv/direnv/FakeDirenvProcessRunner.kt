@@ -17,7 +17,8 @@ class FakeDirenvProcessRunner : DirenvProcessRunner {
         val extraEnv: Map<String, String>,
     )
 
-    val invocations = mutableListOf<Invocation>()
+    val invocations = java.util.concurrent.CopyOnWriteArrayList<Invocation>()
+    var beforeRun: (() -> Unit)? = null
     private val responses = mutableMapOf<String, DirenvProcessResult>()
     private var fallback = DirenvProcessResult(0, "", "")
 
@@ -43,6 +44,7 @@ class FakeDirenvProcessRunner : DirenvProcessRunner {
         extraEnv: Map<String, String>,
         timeoutMs: Int,
     ): DirenvProcessResult {
+        beforeRun?.invoke()
         invocations += Invocation(executable, args, workingDir, extraEnv)
         if (executableMissing) throw DirenvExecutableNotFoundException(executable)
         if (processFails) throw DirenvProcessFailedException("cannot start process", null)

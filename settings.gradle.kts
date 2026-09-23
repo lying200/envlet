@@ -14,7 +14,8 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "direnv"
+// Modified for Envlet: independent artifact name.
+rootProject.name = "envlet"
 
 // Project paths match directory paths, so ":products:terminal" is exactly where the code lives.
 include(
@@ -23,4 +24,6 @@ include(
     "products:gradle",
     "products:java",
     "products:javascript",
+    "products:go",
+    "products:rust",
 )

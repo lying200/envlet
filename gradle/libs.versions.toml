@@ -3,7 +3,8 @@ assertj = "3.27.6"
 changelog = "2.5.0"
 junit = "4.13.2"
 junitJupiter = "5.13.4"
-kotlin = "2.2.21"
+# Modified for Envlet: Java 25 bytecode support (Kotlin 2.3+).
+kotlin = "2.3.0"
 kotlinxSerialization = "1.9.0"
 
 [libraries]
