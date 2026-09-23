@@ -57,3 +57,10 @@ See [ENV-16 provenance and validation](validation-env16.md).
 Go/Rust configuration decisions have focused tests, probe failures have safe
 structured diagnostics, and both adapters guard the actual SDK publication point.
 See [ENV-17 implementation and validation](validation-env17.md).
+
+## ENV-18 follow-up
+
+The shared-watch regression introduced by ENV-16 is fixed with explicit scope
+ownership and all-dependent-scope refresh. The same regression test passes before
+ENV-16 and fails on d3b0be3; external deny/allow and actual WSL process injection
+are verified in IDEA. See [ENV-18 evidence](validation-env18.md).

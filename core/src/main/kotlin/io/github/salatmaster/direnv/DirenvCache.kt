@@ -1,4 +1,4 @@
-// Added for ENV-16: one short metadata lock owns cache, aliases, retries and load generations.
+// Modified for ENV-18: watches retain explicit scope ownership independently of cache aliases.
 package io.github.salatmaster.direnv
 
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
@@ -11,12 +11,15 @@ import java.nio.file.Path
  * retaining an unbounded history of per-directory generations.
  */
 internal class DirenvCache {
-    class Load internal constructor(val directory: Path, internal val knownScopes: Map<Path, Path>) {
+    class Load internal constructor(
+        val directory: Path, internal val invalidatedScope: Path, internal val knownScopes: Map<Path, Path>,
+    ) {
         internal var rejected = false
         internal val invalidatedScopes = mutableSetOf<Path>()
     }
     class Change(val revision: Long, val environment: DirenvEnvironmentChange?, val state: DirenvState)
-    class Watches(val revision: Long, val entries: Map<Path, List<DirenvWatch>>)
+    class WatchSet(val scope: Path, val revision: Long, val files: List<DirenvWatch>)
+    class Watches(val revision: Long, val entries: Map<Path, WatchSet>)
 
     private val environments = mutableMapOf<Path, DirenvEnvironment>()
     private val aliases = mutableMapOf<Path, Path>()
@@ -39,8 +42,11 @@ internal class DirenvCache {
 
     @Synchronized fun begin(directory: Path): Load {
         check(active == null) { "Exports must be serialized by the service" }
-        val key = aliases[directory] ?: directory
-        val load = Load(directory, aliases.toMap())
+        // Retained failure-recovery watches still know their scope after aliases are gone.
+        // This is an invalidation hint only; cached() never trusts watch metadata for injection.
+        val knownScopes = watches.entries.mapValues { it.value.scope } + aliases
+        val key = knownScopes[directory] ?: directory
+        val load = Load(directory, key, knownScopes)
         removeScope(key, directory, removeWatches = false)
         active = load
         changed(key, DirenvState.Loading)
@@ -50,12 +56,13 @@ internal class DirenvCache {
     /** Reject obsolete results before touching ANY cache, watch, retry or UI metadata. */
     @Synchronized fun complete(
         load: Load, environment: DirenvEnvironment?, state: DirenvState,
-        newWatches: List<DirenvWatch>?,
+        newWatches: List<DirenvWatch>?, resolvedScope: Path? = null,
     ): Boolean {
         if (active !== load) return false
         active = null
-        val key = environment?.loadedRcPath?.parent?.toAbsolutePath()?.normalize() ?: load.directory
-        val unknownFailedScope = environment == null && load.knownScopes[load.directory] == null
+        val key = environment?.loadedRcPath?.parent?.toAbsolutePath()?.normalize()
+            ?: resolvedScope ?: if (environment == null) load.knownScopes[load.directory] ?: load.directory else load.directory
+        val unknownFailedScope = environment == null && resolvedScope == null && load.knownScopes[load.directory] == null
         if (load.rejected || key in load.invalidatedScopes ||
             (unknownFailedScope && load.invalidatedScopes.any { load.directory.startsWith(it) })) return false
         if (environment != null) {
@@ -65,7 +72,15 @@ internal class DirenvCache {
             failures.record(load.directory, state)
         }
         if (newWatches != null) {
-            watches = Watches(watches.revision + 1, watches.entries + (load.directory to newWatches.toList()))
+            // A reload invalidated all aliases in this scope. Replace its old watch records
+            // too; otherwise orphan queried directories survive with obsolete dependencies.
+            // First discovery of a NEW alias into an existing scope keeps the other aliases'
+            // watches, including missing intermediate .envrc files.
+            val retained = if (key == load.invalidatedScope) watches.entries.filterValues { it.scope != key }
+                else watches.entries
+            val nextRevision = watches.revision + 1
+            watches = Watches(nextRevision, retained +
+                (load.directory to WatchSet(key, nextRevision, newWatches.toList())))
         }
         changed(if (environment != null) key else null, state, environmentChanged = environment != null)
         return true
@@ -87,7 +102,7 @@ internal class DirenvCache {
             changed(null, DirenvState.NotLoaded)
             return
         }
-        val key = aliases[directory] ?: active?.knownScopes?.get(directory) ?: directory
+        val key = aliases[directory] ?: active?.knownScopes?.get(directory) ?: watches.entries[directory]?.scope ?: directory
         active?.let {
             // Unknown children may resolve to this scope after the export finishes.
             it.invalidatedScopes.add(key)
@@ -103,7 +118,8 @@ internal class DirenvCache {
         environments.remove(key)
         aliases.entries.removeIf { it.value == key }
         directories.forEach(failures::remove)
-        if (removeWatches) watches = Watches(watches.revision + 1, watches.entries - directories.toSet())
+        if (removeWatches) watches = Watches(watches.revision + 1,
+            watches.entries.filter { (queried, record) -> record.scope != key && queried !in directories })
     }
 
     private fun changed(scope: Path?, state: DirenvState, environmentChanged: Boolean = true) {

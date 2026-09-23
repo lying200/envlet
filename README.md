@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.7-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.1.8-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -52,7 +52,9 @@ Environment invalidation also rejects exports already in flight; see
 [ENV-16 validation](docs/validation-env16.md). Toolchain failures log safe language,
 stage and reason fields. Invalid Go discovery retains the current SDK; Rust can
 configure a compiler without standard library sources, with a diagnostic. See
-[ENV-17 validation](docs/validation-env17.md) for the latest checks.
+[ENV-17 validation](docs/validation-env17.md) for toolchain checks. Shared-directory
+watch ownership and automatic approval revocation/recovery are covered by
+[ENV-18 validation](docs/validation-env18.md).
 Import Go/Cargo projects as usual.
 Turning off automatic management leaves the last SDK paths in place; you can then
 change them manually. Envlet does not create language run/debug configurations.

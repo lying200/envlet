@@ -1,4 +1,4 @@
-// Modified for ENV-16: VFS watches project only committed cache snapshots.
+// Modified for ENV-18: reload explicit environment scopes, including all shared dependents.
 package io.github.salatmaster.direnv.watch
 
 import com.intellij.openapi.Disposable
@@ -8,6 +8,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import io.github.salatmaster.direnv.DirenvService
+import io.github.salatmaster.direnv.DirenvCache
 import io.github.salatmaster.direnv.settings.DirenvSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -51,8 +52,7 @@ class DirenvWatchService(
         while (!project.isDisposed) {
             val snapshot = service.watchSnapshot()
             if (snapshot.revision == watchRevision) break
-            val replacement = DirenvWatchRegistry()
-            snapshot.entries.forEach { (directory, watches) -> replacement.replace(directory, watches) }
+            val replacement = registryFor(snapshot)
             registry = replacement
             watchRevision = snapshot.revision
             registerFilesystemRoots()
@@ -103,11 +103,8 @@ class DirenvWatchService(
         if (!DirenvSettings.getInstance(project).state.watchFiles) return
 
         // Match against authoritative metadata even while background VFS reconciliation lags.
-        val current = DirenvWatchRegistry()
-        DirenvService.getInstance(project).watchSnapshot().entries.forEach { (directory, watches) ->
-            current.replace(directory, watches)
-        }
-        val targets = changed.mapNotNullTo(mutableSetOf()) { current.reloadTargetFor(it) }
+        val current = registryFor(DirenvService.getInstance(project).watchSnapshot())
+        val targets = changed.flatMapTo(mutableSetOf()) { current.reloadTargetsFor(it) }
         if (targets.isEmpty()) {
             if (log.isDebugEnabled) {
                 log.debug(
@@ -123,7 +120,18 @@ class DirenvWatchService(
 
     /** Exposed for tests and for the reload action. */
     fun watchedPaths(): Set<Path> = DirenvService.getInstance(project).watchSnapshot().entries.values
-        .flatten().mapTo(mutableSetOf()) { it.path.toAbsolutePath().normalize() }
+        .flatMap { it.files }.mapTo(mutableSetOf()) { it.path.toAbsolutePath().normalize() }
+
+    private fun registryFor(snapshot: DirenvCache.Watches): DirenvWatchRegistry {
+        val registry = DirenvWatchRegistry()
+        snapshot.entries.values.groupBy { it.scope }.forEach { (scope, records) ->
+            // Preserve intermediate-directory watches while their aliases are valid. For a
+            // shared file, use its latest committed baseline, regardless of map iteration order.
+            val files = records.sortedBy { it.revision }.flatMap { it.files }.associateBy { it.path }.values
+            registry.replace(scope, files.toList())
+        }
+        return registry
+    }
 
     private fun scheduleReload(targets: Set<Path>) {
         // Editors and build tools rewrite files in bursts; without debouncing, saving a flake.lock

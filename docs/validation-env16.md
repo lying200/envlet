@@ -1,5 +1,9 @@
 # ENV-16: cache generations and environment notifications
 
+**Follow-up:** ENV-16 introduced a shared-watch ownership regression, fixed in
+0.1.8-dev. The original watch validation did not cover root reload followed by
+shared-child approval revocation. See [ENV-18](validation-env18.md).
+
 The stale-export race is inherited from upstream `5365283`: `invalidate()` could
 clear the cache while an export held the coroutine load mutex, and that older
 export could then repopulate it. A gated real-service regression fails on

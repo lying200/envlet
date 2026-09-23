@@ -1,3 +1,4 @@
+// Modified for ENV-18: one shared file can invalidate multiple environment scopes.
 package io.github.salatmaster.direnv.watch
 
 import io.github.salatmaster.direnv.direnv.DirenvWatch
@@ -18,51 +19,29 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class DirenvWatchRegistry {
 
-    /** Watched file → directory whose environment must be reloaded when that file changes. */
-    private val targetByWatchedPath = ConcurrentHashMap<Path, Path>()
+    /** Scope → immutable watch snapshot; replacing one scope cannot steal another's files. */
+    private val watchesByTarget = ConcurrentHashMap<Path, Map<Path, DirenvWatch>>()
 
-    /** The state direnv reported for each watched file, used to detect changes by polling. */
-    private val stateByWatchedPath = ConcurrentHashMap<Path, DirenvWatch>()
-
-    /** Replaces the watch set belonging to [loadedFor], leaving other directories untouched. */
     fun replace(loadedFor: Path, watches: List<DirenvWatch>) {
-        val target = loadedFor.normalise()
-        val obsolete = targetByWatchedPath.filterValues { it == target }.keys
-        obsolete.forEach { stateByWatchedPath.remove(it) }
-        targetByWatchedPath.entries.removeIf { it.value == target }
-
-        for (watch in watches) {
+        watchesByTarget[loadedFor.normalise()] = watches.associate { watch ->
             val path = watch.path.normalise()
-            targetByWatchedPath[path] = target
-            stateByWatchedPath[path] = watch.copy(path = path)
+            path to watch.copy(path = path)
         }
     }
 
-    /**
-     * Returns the directories whose watched files no longer match what direnv reported.
-     *
-     * Polling exists because file system notifications are not dependable for the paths that
-     * matter most: direnv's allow and deny stamps live under the user's data directory, far
-     * outside any project, and the IDE delivered no events for them even with a watch root
-     * registered — verified against a running IDE. direnv itself detects changes the same way,
-     * by comparing modification times.
-     */
-    fun staleTargets(): Set<Path> {
-        val stale = mutableSetOf<Path>()
-        for ((path, recorded) in stateByWatchedPath) {
-            val target = targetByWatchedPath[path] ?: continue
-            if (currentStateOf(path) != recorded.let { it.exists to it.modtime }) {
-                stale.add(target)
-            }
-        }
-        return stale
-    }
+    /** Poll each scope's baseline, including shared dependencies and external approval stamps. */
+    fun staleTargets(): Set<Path> = watchesByTarget.entries.filterTo(mutableListOf()) { (_, watches) ->
+        watches.any { (path, recorded) -> currentStateOf(path) != (recorded.exists to recorded.modtime) }
+    }.mapTo(mutableSetOf()) { it.key }
 
-    /** Records the current on-disk state as the new baseline, so one change is reported once. */
+    /** Do IO on snapshots; don't overwrite a concurrent replacement with an older baseline. */
     fun rebaseline() {
-        for ((path, recorded) in stateByWatchedPath) {
-            val (exists, modtime) = currentStateOf(path)
-            stateByWatchedPath[path] = recorded.copy(exists = exists, modtime = modtime)
+        for ((target, recorded) in watchesByTarget) {
+            val updated = recorded.mapValues { (path, watch) ->
+                val (exists, modtime) = currentStateOf(path)
+                watch.copy(exists = exists, modtime = modtime)
+            }
+            watchesByTarget.replace(target, recorded, updated)
         }
     }
 
@@ -76,16 +55,16 @@ class DirenvWatchRegistry {
         false to 0L
     }
 
-    /** Returns the directory to reload when [changedPath] changes, or null if it is irrelevant. */
-    fun reloadTargetFor(changedPath: Path): Path? = targetByWatchedPath[changedPath.normalise()]
-
-    /** Every path currently watched, for registering filesystem roots outside the project. */
-    fun allWatchedPaths(): Set<Path> = targetByWatchedPath.keys.toSet()
-
-    fun clear() {
-        targetByWatchedPath.clear()
-        stateByWatchedPath.clear()
+    /** Every dependent scope must reload; there is no last-writer-wins target. */
+    fun reloadTargetsFor(changedPath: Path): Set<Path> {
+        val path = changedPath.normalise()
+        return watchesByTarget.entries.filterTo(mutableListOf()) { path in it.value }
+            .mapTo(mutableSetOf()) { it.key }
     }
+
+    fun allWatchedPaths(): Set<Path> = watchesByTarget.values.flatMapTo(mutableSetOf()) { it.keys }
+
+    fun clear() = watchesByTarget.clear()
 
     private fun Path.normalise(): Path = toAbsolutePath().normalize()
 }

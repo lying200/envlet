@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-18, introduced in ENV-16: bind watches to explicit environment scopes,
+  replace orphan shared-directory records after scope reloads, and reload every
+  scope depending on a shared file. Approval revocation can no longer refresh an
+  orphan child while leaving the root's old environment cached.
+
 - Improve ENV-17 diagnostics with language, stage, failure category and exit code,
   keeping probe output and exception messages private. Separate Go/Rust planning
   from guarded SDK publication; test malformed Go output, Rust source fallbacks,

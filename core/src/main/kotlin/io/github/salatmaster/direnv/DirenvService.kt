@@ -114,7 +114,7 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
                     deliverChanges()
                     return@withLock DirenvState.NotLoaded
                 }
-                val committed = cache.complete(load, prepared.environment, prepared.state, prepared.watches)
+                val committed = cache.complete(load, prepared.environment, prepared.state, prepared.watches, prepared.resolvedScope)
                 deliverChanges()
                 if (committed) {
                     withContext(Dispatchers.IO) { DirenvWatchService.getInstance(project).refreshWatches() }
@@ -140,6 +140,7 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
         val state: DirenvState,
         val environment: DirenvEnvironment? = null,
         val watches: List<DirenvWatch>? = null,
+        val resolvedScope: Path? = null,
     )
 
     /** Filesystem and diff work precede the short, version-checked metadata commit. */
@@ -160,14 +161,19 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
             Prepared(DirenvState.Loaded(environment.diffAgainst(System.getenv())), environment,
                 (environment.watches + scopeWatches).distinctBy { it.path })
         }
-        is DirenvOutcome.Blocked -> Prepared(DirenvState.Blocked(outcome.envrcPath), watches = outcome.watches)
-        is DirenvOutcome.Denied -> Prepared(DirenvState.Denied(outcome.envrcPath), watches = outcome.watches)
+        is DirenvOutcome.Blocked -> Prepared(DirenvState.Blocked(outcome.envrcPath), watches = outcome.watches, resolvedScope = scopeOf(outcome.envrcPath))
+        is DirenvOutcome.Denied -> Prepared(DirenvState.Denied(outcome.envrcPath), watches = outcome.watches, resolvedScope = scopeOf(outcome.envrcPath))
         is DirenvOutcome.ExecutableNotFound -> Prepared(DirenvState.ExecutableMissing(outcome.executable))
         is DirenvOutcome.Failed -> {
             log.warn("direnv failed with exit code ${outcome.exitCode}")
             Prepared(DirenvState.Failed(outcome.message))
         }
     }
+
+    /** CLI approval outcomes already map their .envrc path into this IDE's filesystem. */
+    private fun scopeOf(envrc: String): Path? = runCatching {
+        Path.of(envrc).takeIf { it.isAbsolute }?.parent?.normalize()
+    }.getOrNull()
 
     /** Reloads the environment for [workingDir] from a non-suspending caller, e.g. an action. */
     fun scheduleReload(workingDir: Path) {

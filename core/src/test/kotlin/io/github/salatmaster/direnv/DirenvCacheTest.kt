@@ -130,6 +130,27 @@ class DirenvCacheTest {
         assertThat(events.toString()).doesNotContain("env16-private-canary", "SECRET")
     }
 
+    @Test fun `successful root refresh removes orphan child watches by scope`() {
+        commit(root)
+        val child = root.resolve("shared")
+        commit(child, root)
+        assertThat(cache.watchSnapshot().entries.keys).contains(root, child)
+        commit(root)
+        assertThat(cache.cached(child)).isNull()
+        assertThat(cache.watchSnapshot().entries.keys).containsExactly(root)
+        assertThat(cache.watchSnapshot().entries[root]?.scope).isEqualTo(root)
+    }
+
+    @Test fun `failed reload retains recovery watches whose scope survives alias removal`() {
+        val child = root.resolve("shared")
+        commit(child, root)
+        assertThat(cache.complete(cache.begin(root), null, DirenvState.Failed("synthetic"), null)).isTrue()
+        assertThat(cache.cached(child)).isNull()
+        assertThat(cache.watchSnapshot().entries[child]?.scope).isEqualTo(root)
+        cache.invalidate(child)
+        assertThat(cache.watchSnapshot().entries).isEmpty()
+    }
+
     @Test fun `cancellation releases the active load and cannot overwrite a newer invalidation`() {
         val load = cache.begin(root)
         cache.invalidate(null)
