@@ -77,3 +77,9 @@ Confirmed approval refusal now invalidates its actual scope even when first
 discovered by an uncached child. Project Go/Rust probes explicitly use the IDEA
 project directory, independent of the latest export's provenance. See
 [state transitions, regression tests and actual IDEA evidence](validation-env20-21.md).
+
+## ENV-22 follow-up
+
+Scope cleanup includes failed directories retained only in watch metadata, so
+re-approval restores immediate automatic child loading as well as root loading.
+Independent cooldowns remain intact. See [ENV-22 evidence](validation-env22.md).

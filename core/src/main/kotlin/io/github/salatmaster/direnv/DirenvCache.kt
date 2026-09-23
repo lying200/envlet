@@ -1,4 +1,4 @@
-// Modified for ENV-20: confirmed approval refusal invalidates the resolved scope atomically.
+// Modified for ENV-22: scope cleanup includes failed directories retained in watch metadata.
 package io.github.salatmaster.direnv
 
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
@@ -148,7 +148,9 @@ internal class DirenvCache {
     }
 
     private fun removeScope(key: Path, directory: Path, removeWatches: Boolean) {
-        val directories = aliases.filterValues { it == key }.keys +
+        // Refused directories have no live alias; their recovery watches still own the scope.
+        // Clear their cooldown before those watch records are replaced by a successful reload.
+        val directories = knownScopes().filterValues { it == key }.keys +
             active?.knownScopes.orEmpty().filterValues { it == key }.keys + key + directory
         environments.remove(key)
         aliases.entries.removeIf { it.value == key }

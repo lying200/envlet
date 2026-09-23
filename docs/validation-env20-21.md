@@ -2,6 +2,10 @@
 
 Modified for Envlet. Base under review: **a1e8c92**. Packaged fix: **0.1.10-dev**.
 
+Follow-up: this version's recovery checks stopped at the root. ENV-22 found a
+remaining child cooldown after re-approval; [the additional recovery check and
+fix](validation-env22.md) supersede that coverage gap.
+
 ## Provenance and reproduction
 
 ENV-20: an unknown child's export could first discover that the root `.envrc` was

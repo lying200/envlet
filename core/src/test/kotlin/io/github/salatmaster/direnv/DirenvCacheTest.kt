@@ -259,4 +259,27 @@ class DirenvCacheTest {
         assertThat(cache.recentFailure(load.directory)).isNull()
         assertThat(changes()).isEmpty()
     }
+
+    @Test fun `scope recovery clears shared child cooldown but preserves independent cooldown`() {
+        commit(root)
+        val child = root.resolve("shared")
+        val independent = root.resolve("independent")
+        fun refuse(directory: Path, scope: Path) {
+            assertThat(cache.complete(cache.begin(directory), null,
+                DirenvState.Denied(scope.resolve(".envrc").toString()),
+                listOf(DirenvWatch(scope.resolve(".envrc"), 0, false)), scope)).isTrue()
+        }
+        refuse(child, root)
+        refuse(independent, independent)
+        assertThat(cache.recentFailure(child)).isNotNull()
+        val load = cache.beginRefresh(root, root)!!
+        assertThat(cache.complete(load, environment(root), loaded,
+            listOf(DirenvWatch(root.resolve(".envrc"), 0, false)))).isTrue()
+        assertThat(cache.cached(root)).isNotNull()
+        assertThat(cache.cached(child)).isNull()
+        org.assertj.core.api.SoftAssertions.assertSoftly { checks ->
+            checks.assertThat(cache.recentFailure(child)).describedAs("shared cooldown cleared").isNull()
+            checks.assertThat(cache.recentFailure(independent)).describedAs("independent cooldown retained").isNotNull()
+        }
+    }
 }

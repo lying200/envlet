@@ -8,6 +8,10 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-22: scope recovery clears cooldowns for failed directories whose scope
+  is retained only in watch metadata. A child can prepare its environment immediately
+  after root approval is restored; independent scopes retain their retry limits.
+
 - Fix ENV-20: a first-time child discovering Blocked/Denied now invalidates the
   resolved scope and its aliases before publishing recovery watches and state.
   Root process injection and stale SDK publication stop immediately, while later

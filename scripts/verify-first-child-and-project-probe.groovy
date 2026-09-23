@@ -1,4 +1,4 @@
-// ENV-20/21: real Go module selection and first-child approval discovery in an isolated profile.
+// ENV-20/21/22: module selection, first-child refusal and immediate child recovery.
 // An external controller runs direnv deny/allow after the control-file handshakes.
 // Watches are disabled until a first-time child observes refusal, then enabled for recovery.
 import com.intellij.ide.plugins.PluginManagerCore
@@ -46,10 +46,10 @@ try {
         ApplicationManager.application.invokeAndWait({ customizer.customizeEnv(command, values) } as Runnable)
         values.containsKey('ENVLET_ENV20_TEST')
     }
-    def processProbe = {
+    def processProbe = { workingDirectory = root ->
         def shell = root.root.resolve('run/current-system/sw/bin/sh')
         def command = new GeneralCommandLine(shell.toString(), '-c', 'test -n "${ENVLET_ENV20_TEST-}"')
-            .withWorkingDirectory(root)
+            .withWorkingDirectory(workingDirectory)
             .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.NONE)
         def process = command.createProcess()
         if (!process.waitFor(30, TimeUnit.SECONDS)) {
@@ -96,6 +96,7 @@ try {
         service.cachedFor(root) == null && service.state().class.simpleName in ['Blocked', 'Denied']
     }
     assert !sync.isCurrent(previous)
+    def refusalObservedAt = System.nanoTime()
     record('first-child.revocation-invalidates-root-and-sdk=true')
     assert !injected()
     assert !processProbe()
@@ -105,6 +106,14 @@ try {
     Files.writeString(root.resolve('.control/ready-allow'), 'ready\n')
     waitUntil('controller restored approval') { Files.exists(root.resolve('.control/allowed')) }
     waitUntil('watcher restores root') { service.cachedFor(root) != null }
+    // Exercise the directory that recorded the refusal, not just the restored root.
+    // The old implementation returned no environment here until its 60-second cooldown expired.
+    def previouslyDeniedChild = root.resolve('unseen')
+    assert service.cachedFor(previouslyDeniedChild) == null
+    assert processProbe(previouslyDeniedChild)
+    assert System.nanoTime() - refusalObservedAt < TimeUnit.SECONDS.toNanos(60)
+    assert service.cachedFor(previouslyDeniedChild) != null
+    record('automatic-approval.child-process-without-cooldown=true')
     assert injected()
     assert processProbe()
     record('automatic-approval.process-injection=true')

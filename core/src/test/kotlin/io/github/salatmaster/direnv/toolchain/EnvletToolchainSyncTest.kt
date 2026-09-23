@@ -302,6 +302,14 @@ class EnvletToolchainSyncTest : DirenvLightTestCase() {
         assertThat(restored.environment).isSameAs(service.cachedFor(workDir))
         assertThat(restored.environment).isNotSameAs(original.environment)
         finish(restored)
+        val exportsBeforeRetry = runner.invocations.count { it.args.firstOrNull() == "export" }
+        assertThat(service.cachedFor(child)).isNull() // Approval must not restore unverified aliases.
+        assertThat(service.environmentForProcess(child))
+            .describedAs("child can immediately resolve after approval restores the root")
+            .isNotNull()
+        assertThat(runner.invocations.count { it.args.firstOrNull() == "export" })
+            .isEqualTo(exportsBeforeRetry + 1)
+        finish(nextProbe())
     }
 
     fun `test shared child export must not move project toolchain probe cwd`() = runBlocking<Unit> {
