@@ -8,6 +8,32 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-32: keep Python discovery paths in source-only module libraries instead
+  of SDK user-added runtime paths. Explicit Run PYTHONPATH and independent child
+  environments no longer inherit root-only dependencies; editor import resolution
+  remains available across SDK refreshes.
+
+- Fix ENV-31: initialize WSL SDK path mappings before adding Python search roots.
+  Background SDK refresh can no longer preserve UNC paths as remote paths and
+  break script/working-directory resolution when sys.path includes the project.
+  Normal SDK synchronization replaces old malformed mappings.
+
+- Fix ENV-30: preserve PYTHONPATH empty entries and their order when adding
+  Python IDE helper paths. Ignore whole empty values without adding cwd, and
+  retain repeated empty entries so a separator-only value cannot collapse to
+  an empty string. Nonempty paths still keep their first occurrence.
+
+- Fix ENV-29: Python WSL Run env-file variables now override direnv, while direct
+  Run variables retain highest priority. Both explicit sources satisfy unset
+  replacement checks. Reject environment scripts rather than executing them
+  twice to recover variable provenance; plain files use IDEA's parser.
+
+- Add ENV-24–28: optional Python interpreter discovery from the approved root
+  environment, guarded SDK selection on WSL/native Linux, and transient WSL
+  Python Run environment injection. Preserve non-Python project SDKs and reject
+  unsupported WSL inherited-variable unsets explicitly. Python 262 Internal API
+  dependencies have an exact verifier baseline; unreviewed uses remain errors.
+
 - Fix ENV-22: scope recovery clears cooldowns for failed directories whose scope
   is retained only in watch metadata. A child can prepare its environment immediately
   after root approval is restored; independent scopes retain their retry limits.

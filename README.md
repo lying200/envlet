@@ -11,7 +11,7 @@ for personal use; see [validation and limits](docs/validation.md).
 
 The inherited plugin loads approved `.envrc` environments for IDE processes,
 terminals and Gradle, and offers Java/Node toolchains. Envlet adds automatic
-Go/Rust setup for the owner's workflow. Progress and acceptance criteria are in
+Go/Rust/Python setup for the owner's workflow. Progress and acceptance criteria are in
 [the implementation plan](docs/plan.md).
 
 Envlet requires a trusted IDE project and an approved `.envrc`. Review the file
@@ -22,12 +22,12 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.8-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.2.4-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
 Open the project through its WSL path. Under **Settings → Tools → Envlet**,
-automatic Go/Rust management and terminal shell-hook mode default to enabled.
+automatic Go/Rust/Python management and terminal shell-hook mode default to enabled.
 Keep your existing fish `direnv hook` and turn on IDEA's **Terminal → Shell integration**.
 The terminal loads through its own hook, preserving devenv's startup output;
 IDE processes and SDK selection use Envlet's in-memory environment cache.
@@ -59,7 +59,44 @@ Import Go/Cargo projects as usual.
 Turning off automatic management leaves the last SDK paths in place; you can then
 change them manually. Envlet does not create language run/debug configurations.
 
+### Python
+
+Enable JetBrains' Python plugin and **Tools → Envlet → Automatically configure
+Python from this project’s environment**. Envlet follows the approved project environment's PATH,
+probes the selected interpreter in the project root, and selects a Python SDK.
+Plain direnv and Nix/devenv environments use the same path; Envlet does not create
+virtual environments or install packages. It preserves an existing non-Python
+project SDK (for example a Java JDK); configure mixed-language modules manually.
+For modules using the selected SDK, discovered search paths are stored in an
+`Envlet Python search paths` source library for editor resolution. They are not
+SDK user-added paths and do not force the root environment's PYTHONPATH into
+every Run. Explicit overrides and independent child environments can replace it.
+
+Windows IDEA with a WSL project requires the full **Python** plugin, including
+its WSL interpreter integration; Python Community Edition alone is insufficient
+for this target. Native Linux uses a local Python SDK. WSL Python Run processes
+receive their own working directory's environment at launch. Direct Run variables
+override Run env files, which override direnv; IDE helper PYTHONPATH entries are retained.
+Env files can also replace a variable that direnv unsets. Plain env files use
+IDEA's parser. `.sh`/`.bat` environment scripts are rejected on this WSL path:
+the extension receives an already merged environment, and recovering script
+variables by executing the scripts a second time would cause duplicate side effects.
+Native Linux runs use the existing general process injector (direnv values take
+precedence there). Values are not saved into Run configurations.
+
+The WSL Target API cannot delete a variable inherited from the target shell. If
+an export requests an unset without an explicit Run override, Envlet rejects the
+launch with an explanation rather than silently keeping the inherited value or
+substituting an empty string. Use a direnv-loaded terminal for that case. Python
+console/package-manager processes, Debug and pytest have not been validated yet;
+SSH, Docker, native Windows Python SDK management and PyCharm itself are outside
+the tested scope. The Python adapter uses a small, reviewed set of Internal APIs
+and is bounded to IDE build 262. See [Python validation](docs/validation-env24.md)
+and [API decisions](docs/research/python-support.md). Env-file regression checks
+are recorded in [ENV-29 validation](docs/validation-env29.md).
+
 To roll back, disable or uninstall Envlet and restore any previous SDK selections.
+Python's `Envlet Python search paths` module libraries can then be removed too.
 Its settings use `envlet.xml`; upstream settings remain separate.
 Generated SDKs require a writable project cache. Envlet writes an ignore file only
 inside `.direnv/envlet`, preserving the project's `.gitignore`. Tool changes create

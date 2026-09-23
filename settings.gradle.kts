@@ -26,4 +26,5 @@ include(
     "products:javascript",
     "products:go",
     "products:rust",
+    "products:python",
 )

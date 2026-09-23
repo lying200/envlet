@@ -83,3 +83,47 @@ project directory, independent of the latest export's provenance. See
 Scope cleanup includes failed directories retained only in watch metadata, so
 re-approval restores immediate automatic child loading as well as root loading.
 Independent cooldowns remain intact. See [ENV-22 evidence](validation-env22.md).
+
+
+## Python — ENV-24–28
+
+ENV-23 established that Python WSL Targets bypass the generic command-line
+injector and that PythonCore alone does not provide the WSL interpreter factory.
+ENV-24 tracks the implementation, with ENV-25 API boundaries, ENV-26 interpreter
+selection, ENV-27 launch environment and ENV-28 validation/delivery.
+
+The optional adapter follows the root environment for SDK discovery and each
+run's actual working directory for WSL environment preparation. It reuses the
+existing cache and environment-change protocol. No Python-specific cache, shell
+wrapper or persisted environment map is added. See
+[implementation and actual validation](validation-env24.md).
+
+## ENV-29 follow-up
+
+Python WSL Run resolves plain env-file values and direct settings into one
+explicit override map for merging and unset handling. It uses the platform parser
+without adding cache or lifecycle state. Environment scripts are explicitly
+unsupported because replaying them would repeat side effects. See
+[regression evidence and boundary](validation-env29.md).
+
+## ENV-30 follow-up
+
+Python helper-path merging preserves meaningful empty entries (cwd) while
+ignoring whole empty values. This corrects the Python adapter introduced in
+ENV-24, without changing the shared environment lifecycle. See
+[path semantics and regression evidence](validation-env30.md).
+
+## ENV-31 follow-up
+
+WSL Python SDK construction initializes local-to-target mappings before
+registering added paths. The SDK's normal replacement and background refresh
+remain responsible for existing metadata; no command rewriting or retry is added.
+See [cause and validation](validation-env31.md).
+
+## ENV-32 follow-up
+
+Python discovery roots belong to editor resolution, not SDK user-added runtime
+paths. Envlet manages a source-only module library alongside SDK selection so
+explicit Run PYTHONPATH and independent child environments can replace root
+search paths. Existing Run merging and the shared environment lifecycle remain
+unchanged. See [regression evidence](validation-env32.md).

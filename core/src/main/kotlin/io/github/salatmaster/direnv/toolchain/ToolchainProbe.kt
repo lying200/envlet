@@ -8,11 +8,11 @@ import io.github.salatmaster.direnv.direnv.DirenvProcessRunner
 import kotlinx.coroutines.CancellationException
 import java.nio.file.Path
 
-enum class ToolchainLanguage { GO, RUST, UNSPECIFIED }
-enum class ToolchainStage { DISCOVERY, GO_ENV, RUST_SYSROOT, CARGO_VERSION, CONFIGURATION, SYNCHRONIZATION }
+enum class ToolchainLanguage { GO, RUST, PYTHON, UNSPECIFIED }
+enum class ToolchainStage { DISCOVERY, PYTHON_INFO, GO_ENV, RUST_SYSROOT, CARGO_VERSION, CONFIGURATION, SYNCHRONIZATION }
 enum class ToolchainReason {
     NOT_CONFIGURED, PATH_MAPPING, EXECUTABLE_MISSING, EXECUTION_FAILED, NONZERO_EXIT,
-    INVALID_OUTPUT, INVALID_SDK, MISSING_SOURCES, UNSUPPORTED_TARGET, UNEXPECTED,
+    INVALID_OUTPUT, INVALID_SDK, SDK_CONFLICT, MISSING_SOURCES, UNSUPPORTED_TARGET, UNEXPECTED,
 }
 
 /** Only finite categories and an exit code may enter diagnostics. */

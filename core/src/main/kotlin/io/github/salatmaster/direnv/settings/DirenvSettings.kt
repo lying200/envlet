@@ -42,6 +42,9 @@ class DirenvSettings : PersistentStateComponent<DirenvSettings.State> {
         @JvmField
         var autoRustToolchain: Boolean = true
 
+        @JvmField
+        var autoPythonToolchain: Boolean = true
+
         /** Generous by default: a first nix or devbox build routinely takes minutes. */
         @JvmField
         var timeoutSeconds: Int = 120

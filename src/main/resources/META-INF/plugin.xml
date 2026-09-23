@@ -87,6 +87,8 @@
     <depends optional="true" config-file="envlet-go.xml">org.jetbrains.plugins.go</depends>
     <depends optional="true" config-file="envlet-rust.xml">com.jetbrains.rust</depends>
 
+    <depends optional="true" config-file="envlet-python.xml">PythonCore</depends>
+
     <actions>
         <group id="envlet.actions" text="Envlet" popup="true">
             <action id="envlet.reload"

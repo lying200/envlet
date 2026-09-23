@@ -1,6 +1,6 @@
 # Contributing
 
-Modified for Envlet: IDEA 262, optional Go/Rust adapters and focused validation.
+Modified for Envlet: IDEA 262, optional Go/Rust/Python adapters and focused validation.
 
 Thanks for considering a contribution. This document assumes no prior knowledge of the codebase.
 
@@ -31,6 +31,7 @@ runner. Install it if you want to exercise the plugin by hand in `runIde`.
 | `products/javascript` | JavaScript plugin | Node suggestion |
 | `products/go` | Go plugin | Go SDK and GOPATH synchronization |
 | `products/rust` | Rust plugin | Rust WSL toolchain and source synchronization |
+| `products/python` | PythonCore; WSL factory from full Python plugin | Python SDK selection and WSL Target execution environment |
 
 Gradle project paths match directory paths, so `products/terminal` is the project
 `:products:terminal`. Everything is compiled into a single jar; the split exists for one reason
@@ -104,3 +105,18 @@ cannot be withdrawn as easily as a tag.
 
 Explain why a change is needed, not only what it does. If you worked around a platform behaviour,
 say which one — that context is what makes the code maintainable later.
+
+## Python compatibility checks
+
+Python 262 marks its WSL SDK data, flavor, target factory and process extension
+as Internal. Keep these references inside `products/python`. `verifyPlugin`
+continues to fail for binary/OverrideOnly problems and checks every reported
+Internal API use against `config/python-262-internal-api.txt`. This is an exact
+API-and-caller baseline, not a package-wide exclusion. Read
+[the API decisions](docs/research/python-support.md) and run the actual launch
+checks before changing it or widening the supported IDE range. The verifier's
+normal `ignoredProblemsFile` applies to compatibility problems, not these uses.
+
+The default PythonCore build dependency is pinned to 262.10968.63. An installed
+matching plugin can be used with `-PlocalPythonPluginPath=/path/to/python-ce`.
+Real WSL tests additionally install the full Python plugin in an isolated profile.
