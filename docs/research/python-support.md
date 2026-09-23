@@ -279,3 +279,23 @@ the existing Java SDK check meaningful after disk configuration has loaded.
 The platform deprecates JpsProjectLoadingManager in favor of this method; this
 additional Internal dependency is explicitly recorded in the verifier baseline.
 [Platform lifecycle API guidance](https://github.com/JetBrains/intellij-community/blob/master/platform/projectModel-api/src/com/intellij/workspaceModel/ide/JpsProjectLoadingManager.kt)
+
+### WSL SDK root mappings (ENV-31)
+
+Before registering added VirtualFile paths on `PyTargetAwareAdditionalData`,
+initialize `PathMappingSettings` with explicit local/remote pairs for every probed
+root, using the existing project path mapper.
+Those VirtualFiles have host paths, while Python's `pathsAddedByUser` must return
+target paths. An empty mapping preserves UNC strings unchanged. The platform's
+`PyTargetsIntrospectionFacade` retains these user mappings before adding detected
+interpreter paths, making the mistake survive background refresh. If the project
+root is among them, it also overrides script/cwd resolution.
+
+Compute the mappings on the existing background discovery path, before publishing
+the candidate SDK. This covers every SDK root, including project-external paths,
+not just the opened project. Replacing the candidate's complete additional data
+through normal synchronization also replaces old malformed mapping entries.
+
+In 262, `WslTargetEnvironment` itself delegates process creation to EEL. Seeing
+`EelTargetEnvironment` in a stack trace does not establish that a WSL SDK changed
+type. See [ENV-31 runtime evidence](../validation-env31.md).

@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-31: initialize WSL SDK path mappings before adding Python search roots.
+  Background SDK refresh can no longer preserve UNC paths as remote paths and
+  break script/working-directory resolution when sys.path includes the project.
+  Normal SDK synchronization replaces old malformed mappings.
+
 - Fix ENV-30: preserve PYTHONPATH empty entries and their order when adding
   Python IDE helper paths. Ignore whole empty values without adding cwd, and
   retain repeated empty entries so a separator-only value cannot collapse to

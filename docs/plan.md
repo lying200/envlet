@@ -112,3 +112,10 @@ Python helper-path merging preserves meaningful empty entries (cwd) while
 ignoring whole empty values. This corrects the Python adapter introduced in
 ENV-24, without changing the shared environment lifecycle. See
 [path semantics and regression evidence](validation-env30.md).
+
+## ENV-31 follow-up
+
+WSL Python SDK construction initializes local-to-target mappings before
+registering added paths. The SDK's normal replacement and background refresh
+remain responsible for existing metadata; no command rewriting or retry is added.
+See [cause and validation](validation-env31.md).

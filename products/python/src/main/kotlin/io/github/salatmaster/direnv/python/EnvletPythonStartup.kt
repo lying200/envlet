@@ -14,6 +14,7 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.backend.workspace.impl.WorkspaceModelInternal
+import com.intellij.util.PathMappingSettings
 import com.jetbrains.python.run.PythonInterpreterTargetEnvironmentFactory
 import com.jetbrains.python.sdk.PythonSdkAdditionalData
 import com.jetbrains.python.sdk.PythonSdkType
@@ -58,9 +59,16 @@ class EnvletPythonStartup : ProjectActivity {
                 return@watch
             }
             val flavor = PyFlavorAndData(PyFlavorData.Empty, UnixPythonSdkFlavor.getInstance())
-            val data = if (configuration == null) PythonSdkAdditionalData(flavor, root)
+            val data = if (wsl == null) PythonSdkAdditionalData(flavor, root)
                 else PyTargetAwareAdditionalData(flavor, root, configuration, null).apply {
-                    interpreterPath = DirenvMachine.pathMapper(project).toDirenv(plan.executable) ?: return@watch
+                    val mapper = DirenvMachine.pathMapper(project)
+                    interpreterPath = mapper.toDirenv(plan.executable) ?: return@watch
+                    // Added SDK roots are local VirtualFiles. Initialize their remote mapping
+                    // before Python's updater preserves them as user-provided paths.
+                    setPathMappings(PathMappingSettings(plan.roots.map { local ->
+                        val remote = mapper.toDirenv(local) ?: return@watch
+                        PathMappingSettings.PathMapping(local.toString(), remote)
+                    }))
                 }
             // sys.path was probed in direnv, not in the IDE's unrelated parent environment.
             // Only SDK paths persist; there is no environment map in SDK additional data.

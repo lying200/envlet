@@ -37,6 +37,10 @@ the Internal API baseline is unchanged.
 
 ## Separate IDE acceptance failure
 
+Follow-up: ENV-31 identified the cause as missing SDK path mappings during
+Envlet SDK construction. WSL Target normally delegates to EEL in this build;
+there was no SDK type switch. See [diagnosis and repair](validation-env31.md).
+
 The full IDE suite did **not** pass: after SDK switching and approval denial,
 execution used EelTargetEnvironment and sent a UNC cwd as `/wsl.localhost/...`,
 then failed with ENOENT. Both attempts reached and passed the new import check.

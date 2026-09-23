@@ -83,6 +83,19 @@ try {
  def cfg=factory.createTemplateConfiguration(project)
  cfg.name='Envlet Python probe';cfg.setSdk(sdk);cfg.setUseModuleSdk(false)
  cfg.setScriptName(script);cfg.setWorkingDirectory(root.toString());cfg.setAddContentRoots(false);cfg.setAddSourceRoots(false)
+ def distribution=com.intellij.execution.wsl.WslPath.parseWindowsUncPath(root.toString()).distribution
+ def targetDataClass=pythonClass('com.jetbrains.python.target.PyTargetAwareAdditionalData')
+ def checkSdkMappings={ String label ->
+  def paths=targetDataClass.getPathsAddedByUser(cfg.getSdk().sdkAdditionalData)
+  assert !paths.isEmpty()
+  assert paths.values().contains(linuxRoot) // cwd is in the fixture's probed sys.path
+  assert paths.keySet().any { !it.startsWith(root) } // stdlib/Nix paths outside the project
+  paths.each { local, remote ->
+   assert remote==distribution.getWslPath(local.toString()):'Incorrect SDK root mapping: '+label
+  }
+  record('sdk-mappings.'+label+'=true')
+ }
+ checkSdkMappings('initial')
  def executor=DefaultRunExecutor.getRunExecutorInstance()
  def runPython={ boolean enabled, String label=String.valueOf(enabled) ->
   settings.state.enabled=enabled
@@ -135,6 +148,13 @@ try {
  runPython(true,'blocked-child')
  assert Files.readString(root.resolve('python-run-blocked-child.json')).contains('"env": false')
  cfg.setWorkingDirectory(root.toString())
+ // Repeated actual launches cover the background updater that previously saved bad UNC mappings.
+ for(int i=0;i<3;i++) {
+  Thread.sleep(2000)
+  checkSdkMappings('background-'+i)
+  runPython(true,'background-'+i)
+  assert Files.readString(root.resolve('python-run-background-'+i+'.json')).contains('"env": true')
+ }
  def controls=Files.createDirectories(root.resolve('.control'))
  def signal={ String step ->
   Files.writeString(controls.resolve('ready-'+step),'ready')
@@ -146,11 +166,13 @@ try {
   current?.sdkAdditionalData?.interpreterPath?.endsWith('/.venv-next/bin/python')
  }
  cfg.setSdk(ProjectRootManager.getInstance(project).projectSdk)
+ checkSdkMappings('switched')
  record('sdk.switch=true')
  runPython(true,'switched')
  assert Files.readString(root.resolve('python-run-switched.json')).contains('/.venv-next/bin/python')
  signal('deny')
  waitUntil('revoked root') { service.cachedFor(root)==null && service.state().class.simpleName in ['Blocked','Denied'] }
+ checkSdkMappings('revoked')
  runPython(true,'revoked')
  assert Files.readString(root.resolve('python-run-revoked.json')).contains('"env": false')
  signal('allow')
@@ -171,6 +193,7 @@ try {
  assert unsetResult.contains('"envfile_override": true')
  cfg.setEnvFilePaths([])
  record('env-file-priority-and-unset=true')
+ checkSdkMappings('final')
  signal('restore')
  waitUntil('restored') { def e=service.cachedFor(root); e!=null && !(e.entries.containsKey('HOME') && e.entries.get('HOME')==null) }
  def javaType=pythonClass('com.intellij.openapi.projectRoots.JavaSdk').getInstance()
