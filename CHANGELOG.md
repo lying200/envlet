@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-16: reject exports invalidated while in flight, including their aliases,
+  retry records and watches. Centralize metadata commits behind a short lock; keep
+  direnv/VFS IO outside it. Notify language integrations through a separate scoped,
+  revisioned environment topic while UI continues to display the latest load state.
+
 - Fix ENV-15: base Go/Rust synchronization on the current root environment rather
   than the last project-wide load status. Independent child loads no longer cancel
   active probes or repeat completed SDK writes; root invalidation/replacement and

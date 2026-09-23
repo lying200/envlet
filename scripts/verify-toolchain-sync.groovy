@@ -60,7 +60,7 @@ try {
     def rust = project.getService(loader.loadClass('org.rust.cargo.project.settings.RustProjectSettingsService'))
     def binding = project.getService(loader.loadClass('io.github.salatmaster.direnv.rust.EnvletRustToolchainBinding'))
     waitUntil('Go SDK and fixture GOPATH publication') {
-        go.getSdk(null).isValid() && libraries.libraryRootUrls.any { it.replace('\\', '/').endsWith('/envlet-toolchain-sync-smoke/go-path') }
+        go.getSdk(null).isValid() && libraries.libraryRootUrls.any { it.replace('\\', '/').endsWith('/' + root.fileName.toString() + '/go-path') }
     }
     record('go.sdk-and-gopath.configured=true')
     waitUntil('Rust SDK publication') {
@@ -74,6 +74,18 @@ try {
     assert environment.state().class.simpleName == 'Blocked'
     record('root.reloaded=false')
     record('global-state.after-sdk-publication=Blocked')
+    if (Boolean.getBoolean('envlet.validation.invalidateAfterSync')) {
+        environment.invalidate(root)
+        assert environment.cachedFor(root) == null
+        assert !binding.owns(rust.toolchain.location)
+        record('invalidation.removes-rust-binding=true')
+        environment.scheduleReload(root)
+        waitUntil('root reload and Rust binding recovery') {
+            def latest = environment.cachedFor(root)
+            latest != null && !latest.is(rootEnvironment) && binding.owns(rust.toolchain.location)
+        }
+        record('invalidation.reload-restores-rust-binding=true')
+    }
     record('ACCEPTANCE=true')
     record('FINISHED')
 } catch (Throwable failure) {

@@ -1,4 +1,4 @@
-// Modified for Envlet: verify directory scope and discard stale environments on reload.
+// Modified for ENV-16: generation-checked commits and independent environment notifications.
 package io.github.salatmaster.direnv
 
 import com.intellij.openapi.components.Service
@@ -25,7 +25,7 @@ import kotlinx.coroutines.withContext
 import java.nio.file.Path
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns the loaded direnv environments for one project.
@@ -41,15 +41,9 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
 
     private val log = Logger.getInstance(DirenvService::class.java)
 
-    /** Cache key: directory of the resolved .envrc, or the queried directory when there is none. */
-    private val cache = ConcurrentHashMap<Path, DirenvEnvironment>()
-
-    /** Maps an already-queried working directory to its cache key. */
-    private val keyByQueriedDir = ConcurrentHashMap<Path, Path>()
-
-    private val currentState = AtomicReference<DirenvState>(DirenvState.NotLoaded)
+    private val cache = DirenvCache()
     private val loadMutex = Mutex()
-    private val failures = DirenvLoadFailures()
+    private val deliveringChanges = AtomicBoolean(false)
     private val scheduledLoads = ConcurrentHashMap.newKeySet<Path>()
 
     /** Test seam: lets tests supply a CLI backed by a fake process runner. */
@@ -74,26 +68,12 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
 
     private fun cli(): DirenvCli = cliOverride ?: defaultCli
 
-    fun state(): DirenvState = currentState.get()
+    fun state(): DirenvState = cache.state()
 
-    /** Returns a cached environment covering [workingDir], or null when nothing is loaded for it. */
-    fun cachedFor(workingDir: Path): DirenvEnvironment? {
-        val normalised = workingDir.toAbsolutePath().normalize()
-        keyByQueriedDir[normalised]?.let { key -> cache[key]?.let { return it } }
+    /** Read-only and cache-only: no parent guessing, filesystem access or alias creation. */
+    fun cachedFor(workingDir: Path): DirenvEnvironment? = cache.cached(workingDir.toAbsolutePath().normalize())
 
-        // The directory may itself be the key. That happens whenever the first load was triggered
-        // from a subdirectory — a process started by a build tool, say — because the environment is
-        // then filed under the directory holding the .envrc rather than under the one asked about.
-        cache[normalised]?.let { environment ->
-            keyByQueriedDir[normalised] = normalised
-            return environment
-        }
-
-        // An unseen directory may contain its own .envrc. This cache-only method is also
-        // called on the EDT: do not walk the filesystem or guess from a parent cache entry.
-        // load() resolves the scope in the background and records a verified alias.
-        return null
-    }
+    internal fun watchSnapshot(): DirenvCache.Watches = cache.watchSnapshot()
 
     /**
      * Loads the environment for [workingDir].
@@ -123,44 +103,50 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
         return loadMutex.withLock {
             if (!DirenvGuard.mayRun(project)) return@withLock DirenvState.NotLoaded
             if (!force) cachedFor(normalised)?.let { return@withLock DirenvState.Loaded(it.diffAgainst(System.getenv())) }
-            if (automatic) failures.recent(normalised)?.let { return@withLock it }
+            if (automatic) cache.recentFailure(normalised)?.let { return@withLock it }
 
-            // Revocation, failure or cancellation must never leave the previous environment
-            // available to process injection while the replacement is being evaluated.
-            invalidate(normalised)
-            publish(DirenvState.Loading)
+            val load = cache.begin(normalised)
+            deliverChanges()
             try {
-                val outcome = withContext(Dispatchers.IO) { cli().export(normalised) }
+                val prepared = withContext(Dispatchers.IO) { prepareOutcome(normalised, cli().export(normalised)) }
                 if (!DirenvGuard.mayRun(project)) {
-                    publish(DirenvState.NotLoaded)
+                    cache.cancel(load)
+                    deliverChanges()
                     return@withLock DirenvState.NotLoaded
                 }
-                val newState = withContext(Dispatchers.IO) { applyOutcome(normalised, outcome) }
-                if (newState !is DirenvState.Loaded) failures.record(normalised, newState)
-                publish(newState)
-                newState
+                val committed = cache.complete(load, prepared.environment, prepared.state, prepared.watches)
+                deliverChanges()
+                if (committed) {
+                    withContext(Dispatchers.IO) { DirenvWatchService.getInstance(project).refreshWatches() }
+                    prepared.state
+                } else DirenvState.NotLoaded
             } catch (e: CancellationException) {
-                invalidate(normalised)
-                publish(DirenvState.NotLoaded)
+                cache.cancel(load)
+                deliverChanges()
                 throw e
             } catch (e: ProcessCanceledException) {
-                invalidate(normalised)
-                publish(DirenvState.NotLoaded)
+                cache.cancel(load)
+                deliverChanges()
+                throw e
+            } catch (e: Exception) {
+                cache.cancel(load)
+                deliverChanges()
                 throw e
             }
         }
     }
 
-    private fun applyOutcome(workingDir: Path, outcome: DirenvOutcome): DirenvState = when (outcome) {
+    private class Prepared(
+        val state: DirenvState,
+        val environment: DirenvEnvironment? = null,
+        val watches: List<DirenvWatch>? = null,
+    )
+
+    /** Filesystem and diff work precede the short, version-checked metadata commit. */
+    private fun prepareOutcome(workingDir: Path, outcome: DirenvOutcome): Prepared = when (outcome) {
         is DirenvOutcome.Loaded -> {
             val environment = outcome.environment
             val key = environment.loadedRcPath?.parent?.toAbsolutePath()?.normalize() ?: workingDir
-            cache[key] = environment
-            keyByQueriedDir[workingDir] = key
-            // Register the files this environment depends on, so a change to flake.lock or an
-            // external `direnv allow` triggers a reload.
-            // Watch missing intermediate .envrc files too: creating a nested environment
-            // invalidates an alias which previously resolved to the parent environment.
             val scopeWatches = mutableListOf<DirenvWatch>()
             var directory: Path? = workingDir
             while (directory != null && directory.startsWith(key)) {
@@ -171,43 +157,15 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
                 if (directory == key) break
                 directory = directory.parent
             }
-            DirenvWatchService.getInstance(project).updateWatches(
-                workingDir, (environment.watches + scopeWatches).distinctBy { it.path },
-            )
-            val diff = environment.diffAgainst(System.getenv())
-            log.info(
-                "direnv loaded for $key: " +
-                    "+${diff.added.size} ~${diff.changed.size} -${diff.removed.size}"
-            )
-            DirenvState.Loaded(diff)
+            Prepared(DirenvState.Loaded(environment.diffAgainst(System.getenv())), environment,
+                (environment.watches + scopeWatches).distinctBy { it.path })
         }
-
-        is DirenvOutcome.Blocked -> {
-            // Never cache a blocked result: no environment was produced, and caching one would
-            // silently keep a stale environment alive after the user revoked approval.
-            //
-            // The watches are still registered. direnv reports them even when blocked, and they
-            // include the allow stamp, so approving the file in an external terminal reaches the
-            // IDE — the case where a blocked project most needs to notice a change.
-            DirenvWatchService.getInstance(project).updateWatches(workingDir, outcome.watches)
-            log.info("direnv blocked: ${outcome.envrcPath}")
-            DirenvState.Blocked(outcome.envrcPath)
-        }
-
-        is DirenvOutcome.Denied -> {
-            // Nothing is cached, for the same reason as Blocked: no environment was produced, and
-            // a cached one would outlive the approval it came from. The watches are kept so that
-            // allowing the file again — here or in a terminal — is noticed.
-            DirenvWatchService.getInstance(project).updateWatches(workingDir, outcome.watches)
-            log.info("direnv denied: ${outcome.envrcPath}")
-            DirenvState.Denied(outcome.envrcPath)
-        }
-
-        is DirenvOutcome.ExecutableNotFound -> DirenvState.ExecutableMissing(outcome.executable)
-
+        is DirenvOutcome.Blocked -> Prepared(DirenvState.Blocked(outcome.envrcPath), watches = outcome.watches)
+        is DirenvOutcome.Denied -> Prepared(DirenvState.Denied(outcome.envrcPath), watches = outcome.watches)
+        is DirenvOutcome.ExecutableNotFound -> Prepared(DirenvState.ExecutableMissing(outcome.executable))
         is DirenvOutcome.Failed -> {
             log.warn("direnv failed with exit code ${outcome.exitCode}")
-            DirenvState.Failed(outcome.message)
+            Prepared(DirenvState.Failed(outcome.message))
         }
     }
 
@@ -219,7 +177,7 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
     /** Resolves an unknown process directory without blocking its caller or forcing a reload. */
     fun scheduleLoad(workingDir: Path) {
         val directory = workingDir.toAbsolutePath().normalize()
-        if (failures.recent(directory) != null || !scheduledLoads.add(directory)) return
+        if (cache.recentFailure(directory) != null || !scheduledLoads.add(directory)) return
         scope.launch {
             try {
                 environmentForProcess(directory)
@@ -260,38 +218,42 @@ class DirenvService(private val project: Project, private val scope: CoroutineSc
      * Neither Blocked nor Denied caches an environment, so without this the UI would lose the one
      * file it needs to act on precisely when approval is the only thing left to do.
      */
-    private fun unapprovedRcPath(): Path? = when (val state = currentState.get()) {
+    private fun unapprovedRcPath(): Path? = when (val state = cache.state()) {
         is DirenvState.Blocked -> runCatching { Path.of(state.envrcPath) }.getOrNull()
         is DirenvState.Denied -> runCatching { Path.of(state.envrcPath) }.getOrNull()
         else -> null
     }
 
-    private fun publish(state: DirenvState) {
-        currentState.set(state)
-        if (project.isDisposed) return
-        project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(state)
-        // The banner over a blocked .envrc is an editor notification, and the platform caches those
-        // until something asks for a recompute. Nothing did, so approving a file left the warning
-        // on screen until the editor was closed and reopened — the plugin contradicting itself at
-        // the exact moment the user acted on it.
-        EditorNotifications.getInstance(project).updateAllNotifications()
+    /** Drain committed changes in order, without holding metadata locks across callbacks.
+     * Reentrant invalidations append to this same queue. UI skips superseded results;
+     * environment subscribers re-read the current cache rather than applying old payloads.
+     */
+    private fun deliverChanges() {
+        if (!deliveringChanges.compareAndSet(false, true)) return
+        try {
+            while (true) {
+                val change = cache.nextChange() ?: break
+                if (project.isDisposed) continue
+                change.environment?.let {
+                    project.messageBus.syncPublisher(DirenvEnvironmentListener.TOPIC).environmentChanged(it)
+                }
+                if (cache.isLatest(change)) {
+                    project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(change.state)
+                    EditorNotifications.getInstance(project).updateAllNotifications()
+                }
+            }
+        } finally {
+            deliveringChanges.set(false)
+        }
+        // A producer can enqueue between the last poll and releasing the drainer flag.
+        if (cache.hasChanges()) deliverChanges()
     }
 
-    /** Drops cached environments. Passing null clears everything. */
+    /** Drops cached environments immediately; never waits for exports or filesystem IO. */
     fun invalidate(workingDir: Path?) {
-        if (workingDir == null) {
-            cache.clear()
-            keyByQueriedDir.clear()
-            failures.clear()
-            publish(DirenvState.NotLoaded)
-            return
-        }
-        val normalised = workingDir.toAbsolutePath().normalize()
-        val key = keyByQueriedDir.remove(normalised) ?: normalised
-        failures.remove(normalised)
-        failures.remove(key)
-        cache.remove(key)
-        keyByQueriedDir.entries.removeIf { it.value == key }
+        cache.invalidate(workingDir?.toAbsolutePath()?.normalize())
+        deliverChanges()
+        scope.launch(Dispatchers.IO) { DirenvWatchService.getInstance(project).refreshWatches() }
     }
 
     companion object {

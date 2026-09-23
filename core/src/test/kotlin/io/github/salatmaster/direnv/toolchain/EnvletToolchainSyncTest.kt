@@ -154,26 +154,35 @@ class EnvletToolchainSyncTest : DirenvLightTestCase() {
         finish(replacement)
     }
 
-    fun `test disabling language management cancels work even when root cache is unchanged`() = runBlocking<Unit> {
+    fun `test applying disabled language management invalidates and cancels work`() = runBlocking<Unit> {
         val probe = startRootProbe()
         managementEnabled = false
-        project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(DirenvState.Loading)
+        service.invalidate(null)
         withTimeout(5_000) { probe.job.join() }
         assertThat(probe.job.isCancelled).isTrue()
-        assertThat(service.cachedFor(workDir)).isSameAs(probe.environment)
+        assertThat(service.cachedFor(workDir)).isNull()
         managementEnabled = true
-        project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(DirenvState.Loading)
+        respondLoaded(workDir)
+        service.load(workDir)
         finish(nextProbe())
     }
 
-    fun `test disabling the plugin cancels work despite a cached root`() = runBlocking<Unit> {
+    fun `test applying disabled plugin invalidates and cancels work`() = runBlocking<Unit> {
         val probe = startRootProbe()
         DirenvSettings.getInstance(project).state.enabled = false
-        project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(DirenvState.Loading)
+        service.invalidate(null)
         withTimeout(5_000) { probe.job.join() }
         assertThat(probe.job.isCancelled).isTrue()
         assertThat(sync.isCurrent(probe.environment)).isFalse()
     }
+    fun `test UI status events cannot cancel or restart root synchronization`() = runBlocking<Unit> {
+        val probe = startRootProbe()
+        project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(DirenvState.Loading)
+        project.messageBus.syncPublisher(DirenvStateListener.TOPIC).stateChanged(DirenvState.Failed("child"))
+        finish(probe)
+        assertThat(probes.tryReceive().isFailure).isTrue()
+    }
+
     fun `test late subscriber synchronizes cached root despite a blocked child status`() = runBlocking<Unit> {
         val first = startRootProbe()
         finish(first)

@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.5-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.1.6-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 

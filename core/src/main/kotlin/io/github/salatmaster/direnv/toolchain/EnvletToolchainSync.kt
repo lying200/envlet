@@ -1,4 +1,4 @@
-// Modified for ENV-15: synchronize against root environment identity, not global status.
+// Modified for ENV-16: subscribe to committed environment changes, independently of UI status.
 package io.github.salatmaster.direnv.toolchain
 
 import com.intellij.openapi.components.Service
@@ -7,8 +7,8 @@ import com.intellij.openapi.project.Project
 import io.github.salatmaster.direnv.DirenvGuard
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
-import io.github.salatmaster.direnv.DirenvState
-import io.github.salatmaster.direnv.DirenvStateListener
+import io.github.salatmaster.direnv.DirenvEnvironmentChange
+import io.github.salatmaster.direnv.DirenvEnvironmentListener
 import io.github.salatmaster.direnv.direnv.DirenvEnvironment
 import io.github.salatmaster.direnv.direnv.EelDirenvProcessRunner
 import io.github.salatmaster.direnv.direnv.GeneralCommandLineRunner
@@ -29,11 +29,13 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
     fun watch(enabled: () -> Boolean, synchronize: suspend (DirenvEnvironment) -> Unit) {
         var job: Job? = null
         var synchronizedEnvironment: DirenvEnvironment? = null
-        val listener = object : DirenvStateListener {
+        val listener = object : DirenvEnvironmentListener {
+            override fun environmentChanged(change: DirenvEnvironmentChange) = reconcile()
+
             @Synchronized
-            override fun stateChanged(state: DirenvState) {
-                // Status events describe the last load anywhere in this project. A child can
-                // be loading or blocked while the root environment remains valid and unchanged.
+            fun reconcile() {
+                // Events carry scope/revision, never environment values. Re-read the root
+                // snapshot: delivery may race with a newer commit or invalidation.
                 val environment = if (enabled() && DirenvGuard.mayRun(project)) {
                     DirenvMachine.projectDir(project)?.let { DirenvService.getInstance(project).cachedFor(it) }
                 } else null
@@ -57,8 +59,8 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
                 }
             }
         }
-        project.messageBus.connect(scope).subscribe(DirenvStateListener.TOPIC, listener)
-        listener.stateChanged(DirenvService.getInstance(project).state())
+        project.messageBus.connect(scope).subscribe(DirenvEnvironmentListener.TOPIC, listener)
+        listener.reconcile()
     }
 
     fun isCurrent(environment: DirenvEnvironment): Boolean {

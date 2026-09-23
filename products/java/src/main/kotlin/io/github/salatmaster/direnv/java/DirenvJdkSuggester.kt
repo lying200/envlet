@@ -1,4 +1,4 @@
-// Modified for Envlet: independent UI registration.
+// Modified for ENV-16: suggestions follow environment changes independently of UI state.
 package io.github.salatmaster.direnv.java
 
 import com.intellij.notification.NotificationGroupManager
@@ -15,8 +15,8 @@ import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.util.io.FileUtil
 import io.github.salatmaster.direnv.DirenvMachine
 import io.github.salatmaster.direnv.DirenvService
-import io.github.salatmaster.direnv.DirenvState
-import io.github.salatmaster.direnv.DirenvStateListener
+import io.github.salatmaster.direnv.DirenvEnvironmentChange
+import io.github.salatmaster.direnv.DirenvEnvironmentListener
 import io.github.salatmaster.direnv.toolchain.ToolchainCandidateResolver
 import java.io.File
 import java.nio.file.Path
@@ -33,13 +33,11 @@ class DirenvJdkSuggester : ProjectActivity {
 
     override suspend fun execute(project: Project) {
         project.messageBus.connect().subscribe(
-            DirenvStateListener.TOPIC,
-            object : DirenvStateListener {
+            DirenvEnvironmentListener.TOPIC,
+            object : DirenvEnvironmentListener {
                 private var lastSuggested: Path? = null
 
-                override fun stateChanged(state: DirenvState) {
-                    if (state !is DirenvState.Loaded) return
-
+                override fun environmentChanged(change: DirenvEnvironmentChange) {
                     val workingDir = DirenvMachine.projectDir(project) ?: return
                     val environment = DirenvService.getInstance(project).cachedFor(workingDir) ?: return
 

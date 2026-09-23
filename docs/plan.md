@@ -45,3 +45,9 @@ Go/Rust synchronization now follows the root environment identity rather than
 project-wide display status. Tests and real gated compiler probes verify that an
 independent blocked child does not interrupt SDK setup. See
 [ENV-15 provenance and validation](validation-env15.md).
+
+## ENV-16 follow-up
+
+Cache commits and invalidation now share generation checks and one metadata lock;
+language consumers receive environment changes separately from display status.
+See [ENV-16 provenance and validation](validation-env16.md).
