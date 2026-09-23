@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Fix ENV-15: base Go/Rust synchronization on the current root environment rather
+  than the last project-wide load status. Independent child loads no longer cancel
+  active probes or repeat completed SDK writes; root invalidation/replacement and
+  disabling management still cancel stale work. Bind listeners to their service scope.
+
 - Fix ENV-14 regressions introduced by Envlet's scope-cache changes: prepare unknown
   directories before background process launch when no IDE lock is held, and bound
   automatic retries per directory rather than gating on the last global load result.

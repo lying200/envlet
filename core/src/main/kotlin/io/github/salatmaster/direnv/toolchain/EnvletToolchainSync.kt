@@ -1,3 +1,4 @@
+// Modified for ENV-15: synchronize against root environment identity, not global status.
 package io.github.salatmaster.direnv.toolchain
 
 import com.intellij.openapi.components.Service
@@ -27,13 +28,23 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
 
     fun watch(enabled: () -> Boolean, synchronize: suspend (DirenvEnvironment) -> Unit) {
         var job: Job? = null
+        var synchronizedEnvironment: DirenvEnvironment? = null
         val listener = object : DirenvStateListener {
             @Synchronized
             override fun stateChanged(state: DirenvState) {
+                // Status events describe the last load anywhere in this project. A child can
+                // be loading or blocked while the root environment remains valid and unchanged.
+                val environment = if (enabled() && DirenvGuard.mayRun(project)) {
+                    DirenvMachine.projectDir(project)?.let { DirenvService.getInstance(project).cachedFor(it) }
+                } else null
+                if (environment === synchronizedEnvironment) return
+
                 job?.cancel()
-                if (state !is DirenvState.Loaded || !enabled() || !DirenvGuard.mayRun(project)) return
-                val root = DirenvMachine.projectDir(project) ?: return
-                val environment = DirenvService.getInstance(project).cachedFor(root) ?: return
+                job = null
+                synchronizedEnvironment = environment
+                if (environment == null) return
+                // Remember completed attempts too: unrelated events must not repeat SDK writes
+                // or Cargo refreshes. A root reload produces a new environment and retries.
                 job = scope.launch(Dispatchers.IO) {
                     try {
                         synchronize(environment)
@@ -46,7 +57,7 @@ class EnvletToolchainSync(private val project: Project, private val scope: Corou
                 }
             }
         }
-        project.messageBus.connect().subscribe(DirenvStateListener.TOPIC, listener)
+        project.messageBus.connect(scope).subscribe(DirenvStateListener.TOPIC, listener)
         listener.stateChanged(DirenvService.getInstance(project).state())
     }
 

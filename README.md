@@ -22,7 +22,7 @@ configuration.
 ## Install and use
 
 Build the ZIP below, then use **Settings → Plugins → gear → Install Plugin from Disk**.
-Disable direnv Everywhere, install `envlet-0.1.4-dev.zip`, and restart IDEA.
+Disable direnv Everywhere, install `envlet-0.1.5-dev.zip`, and restart IDEA.
 Go support requires JetBrains' Go plugin. Rust support requires JetBrains' Rust
 plugin and its Native Debugging Support dependency. Envlet does not replace them.
 
@@ -46,7 +46,9 @@ selected executables, including available companion tools; no environment snapsh
 or launcher scripts are written. Standard library sources are configured separately.
 On Windows/WSL this SDK uses EEL so Cargo sync and native dependency builds receive
 the loaded compiler environment. See [ENV-13 validation](docs/validation-env13.md).
-Environment reloads repeat synchronization. Import Go/Cargo projects as usual.
+Root environment changes repeat synchronization. Independent child-directory loading
+or failure does not cancel or repeat root Go/Rust setup. See [ENV-15 validation](docs/validation-env15.md).
+Import Go/Cargo projects as usual.
 Turning off automatic management leaves the last SDK paths in place; you can then
 change them manually. Envlet does not create language run/debug configurations.
 

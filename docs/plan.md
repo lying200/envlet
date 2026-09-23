@@ -38,3 +38,10 @@ The first-directory launch and cross-directory failure regressions introduced in
 Envlet's scope-cache changes have a targeted fix for unlocked background launches.
 UI/locked calls retain the upstream cache-only constraint. See
 [provenance, implementation boundary and validation](validation-env14.md).
+
+## ENV-15 follow-up
+
+Go/Rust synchronization now follows the root environment identity rather than
+project-wide display status. Tests and real gated compiler probes verify that an
+independent blocked child does not interrupt SDK setup. See
+[ENV-15 provenance and validation](validation-env15.md).
