@@ -1,6 +1,7 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
 
 plugins {
     id("org.jetbrains.intellij.platform")
@@ -43,6 +44,7 @@ dependencies {
         pluginComposedModule(implementation(project(":products:javascript")))
         pluginComposedModule(implementation(project(":products:go")))
         pluginComposedModule(implementation(project(":products:rust")))
+        pluginComposedModule(implementation(project(":products:python")))
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
@@ -97,6 +99,10 @@ intellijPlatform {
         }
     }
     pluginVerification {
+        // Python 262 exposes its WSL SDK/launch seams as Internal. Check the exact
+        // reviewed uses below; keep binary and OverrideOnly errors fatal.
+        failureLevel = listOf(VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS,
+            VerifyPluginTask.FailureLevel.OVERRIDE_ONLY_API_USAGES)
         ides {
             create(IntelliJPlatformType.IntellijIdea, providers.gradleProperty("platformVersion"))
         }
@@ -111,5 +117,22 @@ intellijPlatform {
 
     publishing {
         token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
+}
+
+// Do not turn off Internal API checking globally. Only the reviewed Python 262
+// references in this baseline are allowed; a new caller or API fails verification.
+tasks.verifyPlugin {
+    val baseline = layout.projectDirectory.file("config/python-262-internal-api.txt")
+    val verifiedVersion = pluginVersion.get()
+    inputs.file(baseline)
+    doLast {
+        val allowed = baseline.asFile.readLines().filter { it.isNotBlank() && !it.startsWith("#") }.toSet()
+        val reports = verificationReportsDirectory.get().asFile.walkTopDown()
+            .filter { it.name == "internal-api-usages.txt" && it.parentFile.name == verifiedVersion }.toList()
+        check(reports.isNotEmpty()) { "Missing Internal API report; the Python API baseline was not checked" }
+        val unexpected = reports.flatMap { it.readLines() }.filter { it.isNotBlank() }
+            .map { it.substringBefore(" This ") }.toSet() - allowed
+        check(unexpected.isEmpty()) { "Unreviewed Internal API usages:\n" + unexpected.joinToString("\n") }
     }
 }

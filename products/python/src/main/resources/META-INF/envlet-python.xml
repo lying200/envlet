@@ -1,0 +1,9 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="io.github.salatmaster.direnv.python.EnvletPythonStartup"/>
+    </extensions>
+    <!-- Python 262 has no public Targets environment hook; isolated compatibility dependency. -->
+    <extensions defaultExtensionNs="Pythonid">
+        <pythonCommandLineTargetEnvironmentProvider implementation="io.github.salatmaster.direnv.python.EnvletPythonEnvironmentProvider"/>
+    </extensions>
+</idea-plugin>

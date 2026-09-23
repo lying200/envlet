@@ -8,6 +8,12 @@ All notable changes to this plugin are documented here. The format follows
 
 ### Envlet fork
 
+- Add ENV-24–28: optional Python interpreter discovery from the approved root
+  environment, guarded SDK selection on WSL/native Linux, and transient WSL
+  Python Run environment injection. Preserve non-Python project SDKs and reject
+  unsupported WSL inherited-variable unsets explicitly. Python 262 Internal API
+  dependencies have an exact verifier baseline; unreviewed uses remain errors.
+
 - Fix ENV-22: scope recovery clears cooldowns for failed directories whose scope
   is retained only in watch metadata. A child can prepare its environment immediately
   after root approval is restored; independent scopes retain their retry limits.

@@ -83,3 +83,17 @@ project directory, independent of the latest export's provenance. See
 Scope cleanup includes failed directories retained only in watch metadata, so
 re-approval restores immediate automatic child loading as well as root loading.
 Independent cooldowns remain intact. See [ENV-22 evidence](validation-env22.md).
+
+
+## Python — ENV-24–28
+
+ENV-23 established that Python WSL Targets bypass the generic command-line
+injector and that PythonCore alone does not provide the WSL interpreter factory.
+ENV-24 tracks the implementation, with ENV-25 API boundaries, ENV-26 interpreter
+selection, ENV-27 launch environment and ENV-28 validation/delivery.
+
+The optional adapter follows the root environment for SDK discovery and each
+run's actual working directory for WSL environment preparation. It reuses the
+existing cache and environment-change protocol. No Python-specific cache, shell
+wrapper or persisted environment map is added. See
+[implementation and actual validation](validation-env24.md).

@@ -74,6 +74,11 @@ class DirenvConfigurable(private val project: Project) : BoundConfigurable("Envl
                 checkBox("Automatically configure Rust from this project's environment")
                     .bindSelected(state::autoRustToolchain)
             }
+            row {
+                checkBox("Automatically configure Python from this project's environment")
+                    .bindSelected(state::autoPythonToolchain)
+                    .comment("Preserves an existing non-Python project SDK. WSL requires the full Python plugin.")
+            }
             row("Timeout (seconds):") {
                 intTextField(range = 1..3600)
                     .bindIntText(state::timeoutSeconds)
